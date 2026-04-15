@@ -1,0 +1,141 @@
+.voiceStage {
+  position: relative;
+  z-index: 2;
+  min-height: 100vh;
+  width: min(920px, 100vw);
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 1rem;
+  text-align: center;
+  --audio-level: 0;
+  padding: 2rem;
+}
+
+.stageHeader {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.eyebrow {
+  margin: 0;
+  color: #87d4ff;
+  font: 700 0.7rem/1.2 var(--font-title);
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  opacity: 0.8;
+}
+
+.voiceStage h1 {
+  margin: 0;
+  color: #c4eeff;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  text-shadow: 0 0 20px rgba(91, 219, 255, 0.45), 0 0 70px rgba(43, 171, 255, 0.2);
+}
+
+.orb {
+  width: clamp(260px, 36vw, 430px);
+  aspect-ratio: 1;
+  border-radius: 999px;
+  position: relative;
+  display: grid;
+  place-items: center;
+}
+
+.novaGifWrap {
+  position: absolute;
+  width: clamp(220px, 32vw, 360px);
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  z-index: 2;
+  transform: scale(calc(1 + (var(--voice-scale-level) * 0.38)));
+  transition: transform 90ms linear;
+  filter: none;
+}
+
+.novaGif {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  image-rendering: crisp-edges;
+  user-select: none;
+  pointer-events: none;
+  border-radius: 999px;
+}
+
+.signalTag {
+  margin: 0;
+  font: 700 0.76rem/1 var(--font-title);
+  text-transform: uppercase;
+  letter-spacing: 0.17em;
+  color: rgba(141, 222, 255, 0.9);
+  padding: 0.54rem 0.88rem;
+  border: 1px solid rgba(89, 193, 255, 0.38);
+  border-radius: 999px;
+  background: linear-gradient(120deg, rgba(7, 40, 78, 0.34), rgba(8, 18, 42, 0.5));
+}
+
+.statusLine {
+  color: #dff6ff;
+  font-size: clamp(0.95rem, 1.7vw, 1.1rem);
+  min-height: 1.8rem;
+  max-width: 62ch;
+  padding: 0.2rem 1rem;
+  text-shadow: 0 0 12px rgba(88, 201, 255, 0.4);
+}
+
+.initButton {
+  border: 1px solid rgba(101, 210, 255, 0.5);
+  border-radius: 999px;
+  padding: 0.68rem 1.14rem;
+  font: 700 0.89rem/1 var(--font-title);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #dfffff;
+  background: linear-gradient(130deg, rgba(14, 80, 132, 0.92), rgba(7, 40, 85, 0.92));
+  box-shadow: 0 0 20px rgba(66, 185, 255, 0.2), inset 0 0 18px rgba(101, 216, 255, 0.18);
+  cursor: pointer;
+  transition: transform 0.15s ease, filter 0.15s ease;
+}
+
+.initButton:hover {
+  filter: brightness(1.08);
+  transform: translateY(-1px);
+}
+
+.initButton:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .orb,
+  .novaGifWrap {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+@media (max-width: 640px) {
+  .voiceStage {
+    gap: 0.8rem;
+    padding: 1.1rem;
+    justify-items: center;
+  }
+
+  .orb {
+    width: min(78vw, 340px);
+  }
+
+  .signalTag {
+    font-size: 0.68rem;
+    letter-spacing: 0.12em;
+  }
+
+  .statusLine {
+    font-size: 0.94rem;
+  }
+}

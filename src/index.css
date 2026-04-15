@@ -1,0 +1,75 @@
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;800&family=Rajdhani:wght@400;500;600;700&display=swap');
+
+:root {
+  --bg-1: #000205;
+  --bg-2: #000913;
+  --bg-3: #000103;
+  --text: #dff4ff;
+  --muted: #98cbe3;
+  --font-title: 'Orbitron', 'Avenir Next', 'Trebuchet MS', sans-serif;
+  --font-body: 'Rajdhani', 'Segoe UI', sans-serif;
+
+  color: var(--text);
+  font-family: var(--font-body);
+  line-height: 1.42;
+  font-weight: 500;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  position: relative;
+  margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 50% 52%, rgba(20, 95, 146, 0.14), transparent 34%),
+    radial-gradient(circle at 12% 8%, rgba(16, 68, 113, 0.14), transparent 36%),
+    radial-gradient(circle at 88% 12%, rgba(18, 74, 116, 0.12), transparent 28%),
+    linear-gradient(170deg, var(--bg-1), var(--bg-2) 55%, var(--bg-3));
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.25;
+  background-image:
+    linear-gradient(rgba(129, 214, 255, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(129, 214, 255, 0.08) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(circle at center, black 24%, transparent 82%);
+}
+
+#root {
+  position: relative;
+  z-index: 1;
+  min-height: 100vh;
+}
+
+h1,
+h2 {
+  font-family: var(--font-title);
+  color: var(--text);
+}
+
+h1 {
+  margin: 0.35rem 0;
+  font-size: clamp(1.9rem, 4.2vw, 3.2rem);
+  letter-spacing: 0.01em;
+}
+
+h2 {
+  font-size: 1.2rem;
+}
+
+p {
+  margin: 0;
+}
