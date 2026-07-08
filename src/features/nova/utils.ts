@@ -1,6 +1,32 @@
 export const speechThreshold = 0.018
 export const silenceTimeoutMs = 1000
 
+const conversationIdStorageKey = 'nova.conversationId'
+
+export function loadConversationId(): string | null {
+  try {
+    return sessionStorage.getItem(conversationIdStorageKey)
+  } catch {
+    return null
+  }
+}
+
+export function saveConversationId(id: string): void {
+  try {
+    sessionStorage.setItem(conversationIdStorageKey, id)
+  } catch {
+    // ignore private-browsing / storage restrictions
+  }
+}
+
+export function clearConversationId(): void {
+  try {
+    sessionStorage.removeItem(conversationIdStorageKey)
+  } catch {
+    // ignore private-browsing / storage restrictions
+  }
+}
+
 const preferredMimeTypes = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'] as const
 
 export function resolveWsUrls(): string[] {

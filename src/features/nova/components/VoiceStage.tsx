@@ -6,6 +6,7 @@ type VoiceStageProps = {
   visualAudioLevel: number
   combinedVoiceLevel: number
   hasSpeechInput: boolean
+  assistantText: string
   showMicEnableButton: boolean
   isNovaEnabled: boolean
   onRetry: () => void
@@ -16,6 +17,7 @@ export function VoiceStage({
   visualAudioLevel,
   combinedVoiceLevel,
   hasSpeechInput,
+  assistantText,
   showMicEnableButton,
   isNovaEnabled,
   onRetry,
@@ -37,6 +39,12 @@ export function VoiceStage({
           <img className="novaGif" src="/nova.gif" alt="Nova visualizer" />
         </span>
       </div>
+
+      {assistantText ? (
+        <div className="assistantBubble">
+          <p className="statusLine">{assistantText}</p>
+        </div>
+      ) : null}
 
       {showMicEnableButton ? (
         <button type="button" className="initButton" disabled={!isNovaEnabled} onClick={onRetry}>

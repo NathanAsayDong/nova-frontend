@@ -17,7 +17,6 @@ export type SocketEvent =
   | { type: 'ready'; message: string }
   | { type: 'listening'; message: string }
   | { type: 'chunk_received'; count: number; bytes: number }
-  | { type: 'assistant_progress'; text: string; iteration: number }
   | {
       type: 'assistant_audio_stream_start'
       streamId: string
@@ -36,7 +35,20 @@ export type SocketEvent =
   | { type: 'wake_not_detected'; message: string }
   | { type: 'follow_up_stopped'; message: string }
   | { type: 'no_speech'; message: string }
-  | { type: 'done'; message: string; iterationsUsed: number }
+  | {
+      type: 'assistant_text'
+      text: string
+      seq: number
+      conversationId: string
+      markdownDisplay?: string
+    }
+  | {
+      type: 'done'
+      message: string
+      conversationId: string
+      assistantText: string
+      markdownDisplay?: string
+    }
   | { type: 'error'; message: string }
   | { type: 'pong' }
 

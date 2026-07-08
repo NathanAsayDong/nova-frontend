@@ -2,8 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import bootupSfx from '../../../assets/bootup.mp3'
 import idleSfx from '../../../assets/idle.mp3'
-import loadingSfx from '../../../assets/loading.mp3'
-import messageSfx from '../../../assets/message.mp3'
 import type {
   AudioQueueItem,
   CapturePurpose,
@@ -17,9 +15,12 @@ import {
   acquireAudioStream,
   base64ToArrayBuffer,
   bestMimeType,
+  clearConversationId,
   containsWakePhrase,
   describeMediaError,
+  loadConversationId,
   resolveWsUrls,
+  saveConversationId,
   silenceTimeoutMs,
   speechThreshold,
 } from '../utils'
@@ -36,7 +37,11 @@ type UseNovaRuntimeResult = {
   visualAudioLevel: number
   combinedVoiceLevel: number
   hasSpeechInput: boolean
+  assistantText: string
+  assistantMarkdown: string
+  isMarkdownPanelOpen: boolean
   setIsToolsPanelOpen: Dispatch<SetStateAction<boolean>>
+  setIsMarkdownPanelOpen: Dispatch<SetStateAction<boolean>>
   retryRuntime: () => void
   setNovaPower: (enabled: boolean) => void
   toggleTool: (toolName: string, enabled: boolean) => Promise<void>
@@ -54,6 +59,9 @@ export function useNovaRuntime(): UseNovaRuntimeResult {
   const [audioLevel, setAudioLevel] = useState(0)
   const [agentAudioLevel, setAgentAudioLevel] = useState(0)
   const [uiPhase, setUiPhase] = useState<UiPhase>('idle')
+  const [assistantText, setAssistantText] = useState('')
+  const [assistantMarkdown, setAssistantMarkdown] = useState('')
+  const [isMarkdownPanelOpen, setIsMarkdownPanelOpen] = useState(false)
 
   const wsRef = useRef<WebSocket | null>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
@@ -96,10 +104,12 @@ export function useNovaRuntime(): UseNovaRuntimeResult {
   const isNovaEnabledRef = useRef(true)
   const isShuttingDownRef = useRef(false)
   const bootupCueAudioRef = useRef<HTMLAudioElement | null>(null)
-  const thinkingCueAudioRef = useRef<HTMLAudioElement | null>(null)
   const idleCueAudioRef = useRef<HTMLAudioElement | null>(null)
-  const loadingCueAudioRef = useRef<HTMLAudioElement | null>(null)
-  const loadingCueIntervalRef = useRef<number | null>(null)
+  const conversationIdRef = useRef<string | null>(loadConversationId())
+  const nextTextSeqRef = useRef(1)
+  const pendingTextChunksRef = useRef(new Map<number, string>())
+  const nextMarkdownSeqRef = useRef(1)
+  const pendingMarkdownChunksRef = useRef(new Map<number, string>())
 
   const wsUrls = useMemo(() => resolveWsUrls(), [])
 
@@ -137,6 +147,7 @@ export function useNovaRuntime(): UseNovaRuntimeResult {
     uiPhaseRef.current = 'idle'
     setUiPhase('idle')
     setStatusMessage(message)
+    resetAssistantTurnContent()
   }
 
   const setListening = (message: string) => {
@@ -234,19 +245,6 @@ export function useNovaRuntime(): UseNovaRuntimeResult {
     cleanupAudioUrl()
   }
 
-  const playThinkingCue = () => {
-    if (!thinkingCueAudioRef.current) {
-      thinkingCueAudioRef.current = new Audio(messageSfx)
-      thinkingCueAudioRef.current.preload = 'auto'
-    }
-
-    const cue = thinkingCueAudioRef.current
-    cue.currentTime = 0
-    void cue.play().catch(() => {
-      // Ignore playback errors from browser autoplay policies.
-    })
-  }
-
   const playBootupCue = () => {
     if (!bootupCueAudioRef.current) {
       bootupCueAudioRef.current = new Audio(bootupSfx)
@@ -267,19 +265,6 @@ export function useNovaRuntime(): UseNovaRuntimeResult {
     }
 
     const cue = idleCueAudioRef.current
-    cue.currentTime = 0
-    void cue.play().catch(() => {
-      // Ignore playback errors from browser autoplay policies.
-    })
-  }
-
-  const playLoadingCue = () => {
-    if (!loadingCueAudioRef.current) {
-      loadingCueAudioRef.current = new Audio(loadingSfx)
-      loadingCueAudioRef.current.preload = 'auto'
-    }
-
-    const cue = loadingCueAudioRef.current
     cue.currentTime = 0
     void cue.play().catch(() => {
       // Ignore playback errors from browser autoplay policies.
@@ -360,6 +345,63 @@ export function useNovaRuntime(): UseNovaRuntimeResult {
     setIdle(message)
   }
 
+  const persistConversationId = (id: string) => {
+    conversationIdRef.current = id
+    saveConversationId(id)
+  }
+
+  const resetAssistantTurnContent = () => {
+    setAssistantText('')
+    setAssistantMarkdown('')
+    setIsMarkdownPanelOpen(false)
+    nextTextSeqRef.current = 1
+    pendingTextChunksRef.current.clear()
+    nextMarkdownSeqRef.current = 1
+    pendingMarkdownChunksRef.current.clear()
+  }
+
+  const appendOrderedChunk = (
+    pending: Map<number, string>,
+    nextSeqRef: { current: number },
+    seq: number,
+    value: string,
+    onAppend: (chunk: string) => void,
+  ) => {
+    pending.set(seq, value)
+    let assembled = ''
+    while (pending.has(nextSeqRef.current)) {
+      assembled += pending.get(nextSeqRef.current)!
+      pending.delete(nextSeqRef.current)
+      nextSeqRef.current += 1
+    }
+    if (assembled) {
+      onAppend(assembled)
+    }
+  }
+
+  const appendAssistantTextChunk = (seq: number, text: string) => {
+    appendOrderedChunk(
+      pendingTextChunksRef.current,
+      nextTextSeqRef,
+      seq,
+      text,
+      (chunk) => setAssistantText((current) => current + chunk),
+    )
+  }
+
+  const appendAssistantMarkdownChunk = (seq: number, markdown: string) => {
+    appendOrderedChunk(
+      pendingMarkdownChunksRef.current,
+      nextMarkdownSeqRef,
+      seq,
+      markdown,
+      (chunk) => {
+        setAssistantMarkdown((current) => current + chunk)
+        setIsMarkdownPanelOpen(true)
+      },
+    )
+  }
+
   const sendSocketEvent = (payload: Record<string, unknown>): boolean => {
     const ws = wsRef.current
     if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -387,7 +429,7 @@ export function useNovaRuntime(): UseNovaRuntimeResult {
       event: 'start',
       mimeType: recorderMimeTypeRef.current,
       language: 'en',
-      purpose,
+      ...(conversationIdRef.current ? { conversationId: conversationIdRef.current } : {}),
     })
     if (!started) {
       return
@@ -397,6 +439,7 @@ export function useNovaRuntime(): UseNovaRuntimeResult {
     capturePurposeRef.current = purpose
     if (purpose === 'turn') {
       suppressAssistantAudioUntilNextTurnRef.current = false
+      resetAssistantTurnContent()
     }
     pendingStopPurposeRef.current = null
     lastSpeechAtRef.current = Date.now()
@@ -424,7 +467,11 @@ export function useNovaRuntime(): UseNovaRuntimeResult {
       const stopPurpose = pendingStopPurposeRef.current
       pendingStopPurposeRef.current = null
       if (stopPurpose) {
-        sendSocketEvent({ event: 'stop', purpose: stopPurpose })
+        sendSocketEvent({
+          event: 'stop',
+          purpose: stopPurpose,
+          ...(conversationIdRef.current ? { conversationId: conversationIdRef.current } : {}),
+        })
       }
     }
 
@@ -448,7 +495,11 @@ export function useNovaRuntime(): UseNovaRuntimeResult {
     }
 
     pendingStopPurposeRef.current = null
-    sendSocketEvent({ event: 'stop', purpose })
+    sendSocketEvent({
+      event: 'stop',
+      purpose,
+      ...(conversationIdRef.current ? { conversationId: conversationIdRef.current } : {}),
+    })
   }
 
   const enqueueStreamAudio = (streamId: string) => {
@@ -835,14 +886,6 @@ export function useNovaRuntime(): UseNovaRuntimeResult {
       return
     }
 
-    if (payload.type === 'assistant_progress') {
-      if (suppressAssistantAudioUntilNextTurnRef.current) {
-        return
-      }
-      setThinking(payload.text)
-      return
-    }
-
     if (payload.type === 'listening') {
       if (capturePurposeRef.current === 'turn') {
         setStatusMessage(payload.message)
@@ -925,9 +968,27 @@ export function useNovaRuntime(): UseNovaRuntimeResult {
       return
     }
 
+    if (payload.type === 'assistant_text') {
+      if (suppressAssistantAudioUntilNextTurnRef.current) {
+        return
+      }
+      persistConversationId(payload.conversationId)
+      appendAssistantTextChunk(payload.seq, payload.text)
+      if (payload.markdownDisplay) {
+        appendAssistantMarkdownChunk(payload.seq, payload.markdownDisplay)
+      }
+      return
+    }
+
     if (payload.type === 'done') {
       if (suppressAssistantAudioUntilNextTurnRef.current) {
         return
+      }
+      persistConversationId(payload.conversationId)
+      setAssistantText(payload.assistantText)
+      if (payload.markdownDisplay) {
+        setAssistantMarkdown(payload.markdownDisplay)
+        setIsMarkdownPanelOpen(true)
       }
       pendingFollowUpListeningRef.current = true
       setStatusMessage(payload.message)
@@ -942,6 +1003,10 @@ export function useNovaRuntime(): UseNovaRuntimeResult {
         streamBuffer.ended = true
         notifyStreamWaiters(streamBuffer)
       })
+      if (payload.message.includes('Invalid conversationId')) {
+        conversationIdRef.current = null
+        clearConversationId()
+      }
       setThinking(payload.message)
       captureStartedRef.current = false
       capturePurposeRef.current = 'none'
@@ -1159,39 +1224,9 @@ export function useNovaRuntime(): UseNovaRuntimeResult {
       Date.now() - lastSpeechAtRef.current > silenceTimeoutMs
     ) {
       stopCapture('turn')
-      playThinkingCue()
       setThinking('Transcribing and generating response...')
     }
   }, [audioLevel, uiPhase]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    if (uiPhase !== 'thinking') {
-      if (loadingCueIntervalRef.current !== null) {
-        window.clearInterval(loadingCueIntervalRef.current)
-        loadingCueIntervalRef.current = null
-      }
-      if (loadingCueAudioRef.current) {
-        loadingCueAudioRef.current.pause()
-        loadingCueAudioRef.current.currentTime = 0
-      }
-      return
-    }
-
-    loadingCueIntervalRef.current = window.setInterval(() => {
-      playLoadingCue()
-    }, 3000)
-
-    return () => {
-      if (loadingCueIntervalRef.current !== null) {
-        window.clearInterval(loadingCueIntervalRef.current)
-        loadingCueIntervalRef.current = null
-      }
-      if (loadingCueAudioRef.current) {
-        loadingCueAudioRef.current.pause()
-        loadingCueAudioRef.current.currentTime = 0
-      }
-    }
-  }, [uiPhase])
 
   useEffect(() => {
     void fetchTools()
@@ -1219,11 +1254,6 @@ export function useNovaRuntime(): UseNovaRuntimeResult {
       cleanupAgentAudioAnalysis()
       closeSocket()
       cleanupAudioUrl()
-      if (thinkingCueAudioRef.current) {
-        thinkingCueAudioRef.current.pause()
-        thinkingCueAudioRef.current.src = ''
-        thinkingCueAudioRef.current = null
-      }
       if (bootupCueAudioRef.current) {
         bootupCueAudioRef.current.pause()
         bootupCueAudioRef.current.src = ''
@@ -1233,15 +1263,6 @@ export function useNovaRuntime(): UseNovaRuntimeResult {
         idleCueAudioRef.current.pause()
         idleCueAudioRef.current.src = ''
         idleCueAudioRef.current = null
-      }
-      if (loadingCueIntervalRef.current !== null) {
-        window.clearInterval(loadingCueIntervalRef.current)
-        loadingCueIntervalRef.current = null
-      }
-      if (loadingCueAudioRef.current) {
-        loadingCueAudioRef.current.pause()
-        loadingCueAudioRef.current.src = ''
-        loadingCueAudioRef.current = null
       }
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -1258,7 +1279,11 @@ export function useNovaRuntime(): UseNovaRuntimeResult {
     visualAudioLevel,
     combinedVoiceLevel,
     hasSpeechInput,
+    assistantText,
+    assistantMarkdown,
+    isMarkdownPanelOpen,
     setIsToolsPanelOpen,
+    setIsMarkdownPanelOpen,
     retryRuntime,
     setNovaPower,
     toggleTool,

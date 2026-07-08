@@ -1,4 +1,5 @@
 import { HudBackground } from './features/nova/components/HudBackground'
+import { MarkdownPanel } from './features/nova/components/MarkdownPanel'
 import { ToolsDrawer } from './features/nova/components/ToolsDrawer'
 import { VoiceStage } from './features/nova/components/VoiceStage'
 import { useNovaRuntime } from './features/nova/hooks/useNovaRuntime'
@@ -17,7 +18,11 @@ function App() {
     visualAudioLevel,
     combinedVoiceLevel,
     hasSpeechInput,
+    assistantText,
+    assistantMarkdown,
+    isMarkdownPanelOpen,
     setIsToolsPanelOpen,
+    setIsMarkdownPanelOpen,
     retryRuntime,
     setNovaPower,
     toggleTool,
@@ -32,6 +37,7 @@ function App() {
         visualAudioLevel={visualAudioLevel}
         combinedVoiceLevel={combinedVoiceLevel}
         hasSpeechInput={hasSpeechInput}
+        assistantText={assistantText}
         showMicEnableButton={showMicEnableButton}
         isNovaEnabled={isNovaEnabled}
         onRetry={retryRuntime}
@@ -47,6 +53,13 @@ function App() {
         onToggleOpen={() => setIsToolsPanelOpen((current) => !current)}
         onSetNovaPower={setNovaPower}
         onToggleTool={toggleTool}
+      />
+
+      <MarkdownPanel
+        isOpen={isMarkdownPanelOpen}
+        isToolsPanelOpen={isToolsPanelOpen}
+        markdown={assistantMarkdown}
+        onToggleOpen={() => setIsMarkdownPanelOpen((current) => !current)}
       />
     </main>
   )

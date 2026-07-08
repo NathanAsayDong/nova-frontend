@@ -82,8 +82,20 @@
   font-size: clamp(0.95rem, 1.7vw, 1.1rem);
   min-height: 1.8rem;
   max-width: 62ch;
-  padding: 0.2rem 1rem;
+  padding: 0;
+  margin: 0;
+  text-align: left;
   text-shadow: 0 0 12px rgba(88, 201, 255, 0.4);
+}
+
+.assistantBubble {
+  max-width: min(62ch, 92vw);
+  padding: 0.85rem 1.1rem;
+  border: 1px solid rgba(89, 193, 255, 0.38);
+  border-radius: 14px;
+  background: linear-gradient(145deg, rgba(7, 40, 78, 0.5), rgba(8, 18, 42, 0.72));
+  box-shadow: inset 0 1px 0 rgba(117, 222, 255, 0.14), 0 10px 28px rgba(0, 12, 31, 0.35);
+  text-align: left;
 }
 
 .initButton {

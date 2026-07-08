@@ -1,0 +1,186 @@
+.markdownPanel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 24;
+  width: min(430px, 92vw);
+  border-left: 1px solid rgba(84, 188, 255, 0.34);
+  background:
+    linear-gradient(180deg, rgba(5, 21, 44, 0.93), rgba(1, 10, 22, 0.95)),
+    radial-gradient(circle at top right, rgba(72, 199, 255, 0.2), transparent 55%);
+  backdrop-filter: blur(18px);
+  box-shadow: -14px 0 38px rgba(0, 19, 45, 0.65), inset 1px 0 0 rgba(121, 220, 255, 0.15);
+  transition: transform 0.26s ease, opacity 0.26s ease, right 0.26s ease;
+  transform: translateX(0);
+  opacity: 1;
+}
+
+.markdownPanel.toolsOffset {
+  right: min(430px, 92vw);
+}
+
+.markdownPanel.closed {
+  transform: translateX(100%);
+  opacity: 1;
+  pointer-events: none;
+}
+
+.markdownEdgeToggle {
+  position: fixed;
+  z-index: 29;
+  right: 0;
+  top: 38%;
+  transform: translateY(-50%);
+  width: 30px;
+  height: 84px;
+  border: 1px solid rgba(96, 205, 255, 0.35);
+  border-right: none;
+  border-radius: 10px 0 0 10px;
+  background: rgba(6, 42, 88, 0.62);
+  backdrop-filter: blur(12px);
+  color: #e9f8ff;
+  font: 700 1.4rem/1 var(--font-title);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  transition: background 0.2s ease, right 0.26s ease;
+}
+
+.markdownEdgeToggle.toolsOffset {
+  right: min(430px, 92vw);
+}
+
+.markdownEdgeToggle.toolsOffset.open {
+  right: calc(min(430px, 92vw) + min(430px, 92vw));
+}
+
+.markdownEdgeToggle.open:not(.toolsOffset) {
+  right: min(430px, 92vw);
+}
+
+.markdownEdgeToggle:hover {
+  background: rgba(23, 90, 156, 0.78);
+}
+
+.markdownPanelContent {
+  height: 100%;
+  overflow-y: auto;
+  padding: 1.3rem 1.1rem 1.1rem;
+  text-align: left;
+}
+
+.markdownPanelContent h2 {
+  margin-top: 0;
+  margin-bottom: 0.95rem;
+  color: #d6f4ff;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.markdownBody {
+  color: #dff6ff;
+  font-size: 0.96rem;
+  line-height: 1.55;
+}
+
+.markdownBody h1,
+.markdownBody h2,
+.markdownBody h3 {
+  color: #c4eeff;
+  margin: 1.2rem 0 0.5rem;
+  letter-spacing: 0.04em;
+}
+
+.markdownBody h1 {
+  font-size: 1.35rem;
+}
+
+.markdownBody h2 {
+  font-size: 1.15rem;
+}
+
+.markdownBody h3 {
+  font-size: 1.02rem;
+}
+
+.markdownBody p {
+  margin: 0.55rem 0;
+}
+
+.markdownBody ul,
+.markdownBody ol {
+  margin: 0.55rem 0;
+  padding-left: 1.4rem;
+}
+
+.markdownBody li {
+  margin: 0.25rem 0;
+}
+
+.markdownBody code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.88em;
+  background: rgba(9, 44, 82, 0.65);
+  border: 1px solid rgba(92, 187, 242, 0.24);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+}
+
+.markdownBody pre {
+  margin: 0.75rem 0;
+  padding: 0.85rem 1rem;
+  border-radius: 10px;
+  border: 1px solid rgba(92, 187, 242, 0.24);
+  background: rgba(3, 18, 42, 0.85);
+  overflow-x: auto;
+}
+
+.markdownBody pre code {
+  border: none;
+  background: none;
+  padding: 0;
+}
+
+.markdownBody a {
+  color: #7dd8ff;
+}
+
+.markdownBody blockquote {
+  margin: 0.75rem 0;
+  padding-left: 0.9rem;
+  border-left: 3px solid rgba(89, 193, 255, 0.45);
+  color: rgba(201, 236, 255, 0.9);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .markdownPanel,
+  .markdownEdgeToggle {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+@media (max-width: 860px) {
+  .markdownPanel,
+  .markdownPanel.toolsOffset {
+    width: min(370px, 94vw);
+    right: 0;
+  }
+
+  .markdownPanel.toolsOffset {
+    right: min(370px, 94vw);
+  }
+
+  .markdownEdgeToggle.toolsOffset {
+    right: min(370px, 94vw);
+  }
+
+  .markdownEdgeToggle.toolsOffset.open {
+    right: calc(min(370px, 94vw) + min(370px, 94vw));
+  }
+
+  .markdownEdgeToggle.open:not(.toolsOffset) {
+    right: min(370px, 94vw);
+  }
+}
