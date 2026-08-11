@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { Dispatch, SetStateAction } from 'react'
+import type { ChatStreamEvent } from '../chatTypes'
 import bootupSfx from '../../../assets/bootup.mp3'
 import idleSfx from '../../../assets/idle.mp3'
 import type {
@@ -8,7 +8,6 @@ import type {
   SocketEvent,
   SpeechRecognitionLike,
   StreamAudioBuffer,
-  ToolSummary,
   UiPhase,
 } from '../types'
 import {
@@ -28,40 +27,41 @@ import {
 type UseNovaRuntimeResult = {
   isNovaEnabled: boolean
   showMicEnableButton: boolean
-  isToolsPanelOpen: boolean
-  tools: ToolSummary[]
-  toolsError: string
-  isToolsLoading: boolean
-  savingMap: Record<string, boolean>
   uiPhase: UiPhase
   visualAudioLevel: number
   combinedVoiceLevel: number
   hasSpeechInput: boolean
   assistantText: string
-  assistantMarkdown: string
-  isMarkdownPanelOpen: boolean
-  setIsToolsPanelOpen: Dispatch<SetStateAction<boolean>>
-  setIsMarkdownPanelOpen: Dispatch<SetStateAction<boolean>>
   retryRuntime: () => void
   setNovaPower: (enabled: boolean) => void
-  toggleTool: (toolName: string, enabled: boolean) => Promise<void>
 }
 
-export function useNovaRuntime(): UseNovaRuntimeResult {
+type NovaRuntimeOptions = {
+  /** What the user said, once transcribed. */
+  onUserTranscript?: (text: string) => void
+  /**
+   * Live caption while the user is still speaking. Each call carries the
+   * full text so far (replace, don't append); an empty string means the
+   * caption should be discarded (no final transcript is coming).
+   */
+  onPartialUserTranscript?: (text: string) => void
+  /** Structured turn events (delta / text_final / tool_call / artifact). */
+  onAgentEvent?: (event: ChatStreamEvent) => void
+  /** Turn finished; carries the conversation it belongs to. */
+  onTurnComplete?: (conversationId: string) => void
+}
+
+export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntimeResult {
+  const optionsRef = useRef(options)
+  optionsRef.current = options
+
   const [, setStatusMessage] = useState('Requesting microphone permission...')
   const [isNovaEnabled, setIsNovaEnabled] = useState(true)
   const [showMicEnableButton, setShowMicEnableButton] = useState(true)
-  const [isToolsPanelOpen, setIsToolsPanelOpen] = useState(true)
-  const [tools, setTools] = useState<ToolSummary[]>([])
-  const [toolsError, setToolsError] = useState('')
-  const [isToolsLoading, setIsToolsLoading] = useState(false)
-  const [savingMap, setSavingMap] = useState<Record<string, boolean>>({})
   const [audioLevel, setAudioLevel] = useState(0)
   const [agentAudioLevel, setAgentAudioLevel] = useState(0)
   const [uiPhase, setUiPhase] = useState<UiPhase>('idle')
   const [assistantText, setAssistantText] = useState('')
-  const [assistantMarkdown, setAssistantMarkdown] = useState('')
-  const [isMarkdownPanelOpen, setIsMarkdownPanelOpen] = useState(false)
 
   const wsRef = useRef<WebSocket | null>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
@@ -101,6 +101,10 @@ export function useNovaRuntime(): UseNovaRuntimeResult {
 
   const pendingWakeListeningRef = useRef(false)
   const pendingFollowUpListeningRef = useRef(false)
+  // Set when the user flips the power toggle on: an explicit "I want to talk"
+  // signal, so the next ready connection goes straight to listening instead
+  // of idling until a wake phrase.
+  const pendingPowerOnListenRef = useRef(false)
   const isNovaEnabledRef = useRef(true)
   const isShuttingDownRef = useRef(false)
   const bootupCueAudioRef = useRef<HTMLAudioElement | null>(null)
@@ -108,8 +112,6 @@ export function useNovaRuntime(): UseNovaRuntimeResult {
   const conversationIdRef = useRef<string | null>(loadConversationId())
   const nextTextSeqRef = useRef(1)
   const pendingTextChunksRef = useRef(new Map<number, string>())
-  const nextMarkdownSeqRef = useRef(1)
-  const pendingMarkdownChunksRef = useRef(new Map<number, string>())
 
   const wsUrls = useMemo(() => resolveWsUrls(), [])
 
@@ -328,6 +330,7 @@ export function useNovaRuntime(): UseNovaRuntimeResult {
     awaitingMicrophoneRef.current = false
     pendingWakeListeningRef.current = false
     pendingFollowUpListeningRef.current = false
+    pendingPowerOnListenRef.current = false
     clearRuntimeTimers()
     audioQueueRef.current = []
     streamBuffersRef.current.forEach((streamBuffer) => {
@@ -352,12 +355,8 @@ export function useNovaRuntime(): UseNovaRuntimeResult {
 
   const resetAssistantTurnContent = () => {
     setAssistantText('')
-    setAssistantMarkdown('')
-    setIsMarkdownPanelOpen(false)
     nextTextSeqRef.current = 1
     pendingTextChunksRef.current.clear()
-    nextMarkdownSeqRef.current = 1
-    pendingMarkdownChunksRef.current.clear()
   }
 
   const appendOrderedChunk = (
@@ -389,19 +388,6 @@ export function useNovaRuntime(): UseNovaRuntimeResult {
     )
   }
 
-  const appendAssistantMarkdownChunk = (seq: number, markdown: string) => {
-    appendOrderedChunk(
-      pendingMarkdownChunksRef.current,
-      nextMarkdownSeqRef,
-      seq,
-      markdown,
-      (chunk) => {
-        setAssistantMarkdown((current) => current + chunk)
-        setIsMarkdownPanelOpen(true)
-      },
-    )
-  }
-
   const sendSocketEvent = (payload: Record<string, unknown>): boolean => {
     const ws = wsRef.current
     if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -419,6 +405,11 @@ export function useNovaRuntime(): UseNovaRuntimeResult {
       return
     }
 
+    // Re-sync from storage: the chat hook owns "New conversation" and clears
+    // the stored id there. Without this, the voice path keeps speaking into
+    // the old (now closed) conversation.
+    conversationIdRef.current = loadConversationId() || null
+
     const mimeType = bestMimeType()
     const recorder = mimeType
       ? new MediaRecorder(mediaStreamRef.current, { mimeType })
@@ -429,6 +420,8 @@ export function useNovaRuntime(): UseNovaRuntimeResult {
       event: 'start',
       mimeType: recorderMimeTypeRef.current,
       language: 'en',
+      // Lets the backend skip live-caption passes for wake checks.
+      purpose,
       ...(conversationIdRef.current ? { conversationId: conversationIdRef.current } : {}),
     })
     if (!started) {
@@ -826,62 +819,13 @@ export function useNovaRuntime(): UseNovaRuntimeResult {
     }
   }
 
-  const fetchTools = async () => {
-    setIsToolsLoading(true)
-    setToolsError('')
-    try {
-      const response = await fetch('/tools')
-      if (!response.ok) {
-        throw new Error(`Failed to load tools (${response.status})`)
-      }
-
-      const payload = (await response.json()) as ToolSummary[]
-      setTools(payload)
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      setToolsError(message)
-    } finally {
-      setIsToolsLoading(false)
-    }
-  }
-
-  const toggleTool = async (toolName: string, enabled: boolean) => {
-    const previousTools = tools
-    setToolsError('')
-
-    setTools((current) =>
-      current.map((tool) => (tool.name === toolName ? { ...tool, enabled } : tool)),
-    )
-    setSavingMap((current) => ({ ...current, [toolName]: true }))
-
-    try {
-      const response = await fetch(`/tools/${toolName}`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ enabled }),
-      })
-
-      if (!response.ok) {
-        throw new Error(`Failed to update ${toolName} (${response.status})`)
-      }
-
-      const updatedTool = (await response.json()) as ToolSummary
-      setTools((current) =>
-        current.map((tool) => (tool.name === toolName ? updatedTool : tool)),
-      )
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      setTools(previousTools)
-      setToolsError(message)
-    } finally {
-      setSavingMap((current) => ({ ...current, [toolName]: false }))
-    }
-  }
-
   const handleSocketEvent = (payload: SocketEvent) => {
     if (payload.type === 'ready') {
+      if (pendingPowerOnListenRef.current) {
+        pendingPowerOnListenRef.current = false
+        setListening("I'm listening.")
+        return
+      }
       setIdle('Idle.')
       return
     }
@@ -958,13 +902,58 @@ export function useNovaRuntime(): UseNovaRuntimeResult {
     }
 
     if (payload.type === 'follow_up_stopped') {
+      // Stop phrase spoken — no user_transcript follows, drop the caption.
+      optionsRef.current.onPartialUserTranscript?.('')
       playIdleCue()
       setIdle(payload.message)
       return
     }
 
     if (payload.type === 'no_speech') {
+      optionsRef.current.onPartialUserTranscript?.('')
       setListening('Still listening...')
+      return
+    }
+
+    if (payload.type === 'partial_transcript') {
+      // Live caption of an in-progress recording; only meaningful mid-turn.
+      if (capturePurposeRef.current === 'turn') {
+        optionsRef.current.onPartialUserTranscript?.(payload.text)
+      }
+      return
+    }
+
+    if (payload.type === 'user_transcript') {
+      persistConversationId(payload.conversationId)
+      optionsRef.current.onUserTranscript?.(payload.text)
+      return
+    }
+
+    if (payload.type === 'tool_call' || payload.type === 'artifact') {
+      optionsRef.current.onAgentEvent?.(payload as unknown as ChatStreamEvent)
+      return
+    }
+
+    if (payload.type === 'text_final') {
+      optionsRef.current.onAgentEvent?.({
+        type: 'text_final',
+        text: payload.text,
+        format: 'markdown',
+      })
+      return
+    }
+
+    if (payload.type === 'status_text') {
+      // Pre-tool acknowledgment; its audio arrives via the usual TTS stream
+      // events, this only places the line in the transcript.
+      if (suppressAssistantAudioUntilNextTurnRef.current) {
+        return
+      }
+      persistConversationId(payload.conversationId)
+      optionsRef.current.onAgentEvent?.({
+        type: 'status_text',
+        text: payload.text,
+      })
       return
     }
 
@@ -973,10 +962,13 @@ export function useNovaRuntime(): UseNovaRuntimeResult {
         return
       }
       persistConversationId(payload.conversationId)
+      optionsRef.current.onAgentEvent?.({
+        type: 'delta',
+        text: payload.text,
+        seq: payload.seq,
+        format: 'markdown',
+      })
       appendAssistantTextChunk(payload.seq, payload.text)
-      if (payload.markdownDisplay) {
-        appendAssistantMarkdownChunk(payload.seq, payload.markdownDisplay)
-      }
       return
     }
 
@@ -985,11 +977,8 @@ export function useNovaRuntime(): UseNovaRuntimeResult {
         return
       }
       persistConversationId(payload.conversationId)
+      optionsRef.current.onTurnComplete?.(payload.conversationId)
       setAssistantText(payload.assistantText)
-      if (payload.markdownDisplay) {
-        setAssistantMarkdown(payload.markdownDisplay)
-        setIsMarkdownPanelOpen(true)
-      }
       pendingFollowUpListeningRef.current = true
       setStatusMessage(payload.message)
       if (!isAudioQueueRunningRef.current && audioQueueRef.current.length === 0) {
@@ -999,15 +988,21 @@ export function useNovaRuntime(): UseNovaRuntimeResult {
     }
 
     if (payload.type === 'error') {
+      optionsRef.current.onPartialUserTranscript?.('')
       streamBuffersRef.current.forEach((streamBuffer) => {
         streamBuffer.ended = true
         notifyStreamWaiters(streamBuffer)
       })
-      if (payload.message.includes('Invalid conversationId')) {
+      if (
+        payload.message.includes('Invalid conversationId') ||
+        payload.code === 'conversation_closed'
+      ) {
         conversationIdRef.current = null
         clearConversationId()
       }
-      setThinking(payload.message)
+      // Idle, not thinking: an error ends the turn, and nothing else will
+      // transition the phase afterwards — thinking would be stuck forever.
+      setIdle(payload.message)
       captureStartedRef.current = false
       capturePurposeRef.current = 'none'
     }
@@ -1175,6 +1170,16 @@ export function useNovaRuntime(): UseNovaRuntimeResult {
     }
   }
 
+  const persistNovaPower = (enabled: boolean) => {
+    void fetch('/nova/power', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    }).catch(() => {
+      // Backend power state is advisory; the local teardown is authoritative.
+    })
+  }
+
   const setNovaPower = (enabled: boolean) => {
     if (enabled === isNovaEnabledRef.current) {
       return
@@ -1182,6 +1187,7 @@ export function useNovaRuntime(): UseNovaRuntimeResult {
 
     isNovaEnabledRef.current = enabled
     setIsNovaEnabled(enabled)
+    persistNovaPower(enabled)
     if (!enabled) {
       shutdownRuntime('Nova is off. Turn Nova back on to resume.')
       return
@@ -1189,6 +1195,7 @@ export function useNovaRuntime(): UseNovaRuntimeResult {
 
     setStatusMessage('Starting Nova...')
     playBootupCue()
+    pendingPowerOnListenRef.current = true
     void initializeRuntime()
   }
 
@@ -1229,8 +1236,35 @@ export function useNovaRuntime(): UseNovaRuntimeResult {
   }, [audioLevel, uiPhase]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    void fetchTools()
-    void initializeRuntime()
+    let cancelled = false
+
+    // Restore the persisted power state so a page refresh doesn't turn a
+    // deliberately-off Nova back on.
+    const boot = async () => {
+      try {
+        const response = await fetch('/nova/power')
+        if (response.ok) {
+          const data = (await response.json()) as { enabled?: boolean }
+          if (data.enabled === false) {
+            if (cancelled) {
+              return
+            }
+            isNovaEnabledRef.current = false
+            setIsNovaEnabled(false)
+            setShowMicEnableButton(false)
+            setIdle('Nova is off. Turn Nova back on to resume.')
+            return
+          }
+        }
+      } catch {
+        // Power state is a nicety; default to booting normally.
+      }
+      if (!cancelled) {
+        void initializeRuntime()
+      }
+    }
+    void boot()
+
     const streamBuffers = streamBuffersRef.current
 
     const handleDeviceChange = () => {
@@ -1243,6 +1277,7 @@ export function useNovaRuntime(): UseNovaRuntimeResult {
     navigator.mediaDevices?.addEventListener?.('devicechange', handleDeviceChange)
 
     return () => {
+      cancelled = true
       navigator.mediaDevices?.removeEventListener?.('devicechange', handleDeviceChange)
       streamBuffers.forEach((streamBuffer) => {
         streamBuffer.ended = true
@@ -1270,22 +1305,12 @@ export function useNovaRuntime(): UseNovaRuntimeResult {
   return {
     isNovaEnabled,
     showMicEnableButton,
-    isToolsPanelOpen,
-    tools,
-    toolsError,
-    isToolsLoading,
-    savingMap,
     uiPhase,
     visualAudioLevel,
     combinedVoiceLevel,
     hasSpeechInput,
     assistantText,
-    assistantMarkdown,
-    isMarkdownPanelOpen,
-    setIsToolsPanelOpen,
-    setIsMarkdownPanelOpen,
     retryRuntime,
     setNovaPower,
-    toggleTool,
   }
 }

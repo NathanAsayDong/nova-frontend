@@ -21,7 +21,7 @@ export type SocketEvent =
       type: 'assistant_audio_stream_start'
       streamId: string
       mimeType: string
-      role: 'progress' | 'final' | 'wake'
+      role: 'progress' | 'status' | 'final' | 'wake'
       iteration?: number
     }
   | {
@@ -49,8 +49,32 @@ export type SocketEvent =
       assistantText: string
       markdownDisplay?: string
     }
-  | { type: 'error'; message: string }
+  | { type: 'error'; message: string; code?: string }
   | { type: 'pong' }
+  // Speech and chat share one conversation, so the socket carries the same
+  // structured turn events the chat stream does.
+  | { type: 'partial_transcript'; text: string; seq: number }
+  | { type: 'user_transcript'; text: string; conversationId: string }
+  | { type: 'text_final'; text: string; format?: string; conversationId: string }
+  // Pre-tool acknowledgment: spoken via the TTS stream and shown as a
+  // lightweight status line in the transcript.
+  | { type: 'status_text'; text: string; conversationId: string }
+  | {
+      type: 'tool_call'
+      tool: string
+      input: Record<string, unknown>
+      conversationId: string
+    }
+  | {
+      type: 'artifact'
+      kind: 'diff' | 'file' | 'terminal'
+      title: string
+      content: string
+      language?: string
+      tool?: string
+      exitCode?: number | null
+      conversationId: string
+    }
 
 export type ToolSummary = {
   name: string
@@ -65,7 +89,7 @@ export type AudioQueueItem = { kind: 'stream'; streamId: string }
 export type StreamAudioBuffer = {
   streamId: string
   mimeType: string
-  role: 'progress' | 'final' | 'wake'
+  role: 'progress' | 'status' | 'final' | 'wake'
   chunks: ArrayBuffer[]
   ended: boolean
   waiters: Array<() => void>

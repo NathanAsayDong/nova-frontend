@@ -13,6 +13,21 @@ export default defineConfig({
       '/tools': {
         target: 'http://127.0.0.1:8000',
       },
+      '/chat': {
+        target: 'http://127.0.0.1:8000',
+      },
+      '/conversations': {
+        target: 'http://127.0.0.1:8000',
+      },
+      '/projects': {
+        target: 'http://127.0.0.1:8000',
+      },
+      '/mcp-servers': {
+        target: 'http://127.0.0.1:8000',
+      },
+      '/nova': {
+        target: 'http://127.0.0.1:8000',
+      },
     },
   },
 })
