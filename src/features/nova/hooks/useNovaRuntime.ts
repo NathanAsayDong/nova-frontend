@@ -49,6 +49,14 @@ type NovaRuntimeOptions = {
   onAgentEvent?: (event: ChatStreamEvent) => void
   /** Turn finished; carries the conversation it belongs to. */
   onTurnComplete?: (conversationId: string) => void
+  /**
+   * Stand the whole voice pipeline down without touching Nova's power state.
+   *
+   * Meeting mode uses this: the meeting recorder needs the microphone to
+   * itself, and Nova must not answer the room while one is running. Distinct
+   * from power off, which is a decision the user made and is persisted.
+   */
+  suspended?: boolean
 }
 
 export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntimeResult {
@@ -1203,6 +1211,28 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
     setStatusMessage('Retrying microphone setup...')
     void initializeRuntime()
   }
+
+  // Suspend/resume for meeting mode. Deliberately reuses the same teardown and
+  // startup as the power toggle, so there is one way the runtime stops and one
+  // way it starts, rather than a second half-parallel path.
+  const suspended = options.suspended ?? false
+  const wasSuspendedRef = useRef(false)
+
+  useEffect(() => {
+    if (suspended === wasSuspendedRef.current) {
+      return
+    }
+    wasSuspendedRef.current = suspended
+
+    if (suspended) {
+      shutdownRuntime('Meeting in progress. Nova is transcribing, not listening for you.')
+      return
+    }
+    if (isNovaEnabledRef.current) {
+      setStatusMessage('Meeting ended. Nova is listening again.')
+      void initializeRuntime()
+    }
+  }, [suspended]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const speakingNow = audioLevel > speechThreshold

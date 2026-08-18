@@ -16,8 +16,13 @@ type ConversationHeaderProps = {
   /** A typed turn is streaming; uiPhase only tracks the voice pipeline. */
   isStreaming: boolean
   isNovaEnabled: boolean
+  /** A meeting is recording, so Nova is transcribing rather than listening. */
+  isMeetingMode: boolean
+  /** Blocks the toggle while a meeting is starting or being written up. */
+  isMeetingBusy: boolean
   onNewConversation: () => void
   onTogglePower: () => void
+  onToggleMeeting: () => void
 }
 
 const PHASE_LABEL: Record<UiPhase, string> = {
@@ -34,8 +39,11 @@ export function ConversationHeader({
   uiPhase,
   isStreaming,
   isNovaEnabled,
+  isMeetingMode,
+  isMeetingBusy,
   onNewConversation,
   onTogglePower,
+  onToggleMeeting,
 }: ConversationHeaderProps) {
   const [showProjects, setShowProjects] = useState(false)
 
@@ -47,9 +55,13 @@ export function ConversationHeader({
       <div className="novaHeaderTop">
         <div className="novaBrand">
           <span className="novaMark">NOVA</span>
-          <span className={`phasePill phase-${phase} ${isNovaEnabled ? '' : 'off'}`}>
+          <span
+            className={`phasePill phase-${isMeetingMode ? 'idle' : phase} ${
+              isNovaEnabled && !isMeetingMode ? '' : 'off'
+            }`}
+          >
             <span className="phaseDot" aria-hidden="true" />
-            {isNovaEnabled ? PHASE_LABEL[phase] : 'Offline'}
+            {isMeetingMode ? 'In a meeting' : isNovaEnabled ? PHASE_LABEL[phase] : 'Offline'}
           </span>
           <button
             type="button"
@@ -79,9 +91,33 @@ export function ConversationHeader({
           </button>
         </div>
 
-        <button type="button" className="headerButton" onClick={onNewConversation}>
-          New conversation
-        </button>
+        <div className="novaHeaderActions">
+          <button
+            type="button"
+            className={`meetingToggle ${isMeetingMode ? 'active' : ''}`}
+            onClick={onToggleMeeting}
+            disabled={isMeetingBusy || (!isMeetingMode && !isNovaEnabled)}
+            aria-pressed={isMeetingMode}
+            title={
+              isMeetingMode
+                ? 'Stop recording and write the meeting up'
+                : 'Record a meeting. Nova transcribes and stops answering.'
+            }
+          >
+            {isMeetingMode ? (
+              <span className="meetingDot" aria-hidden="true" />
+            ) : null}
+            {isMeetingBusy
+              ? 'Working…'
+              : isMeetingMode
+                ? 'Stop meeting'
+                : 'Start meeting'}
+          </button>
+
+          <button type="button" className="headerButton" onClick={onNewConversation}>
+            New conversation
+          </button>
+        </div>
       </div>
 
       <div className="novaHeaderMeta">

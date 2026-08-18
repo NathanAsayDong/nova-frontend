@@ -1,0 +1,393 @@
+/* Meeting mode. Same paper-and-green language as the conversation surface,
+   but deliberately cooler and flatter: this is a view you read, not one you
+   talk to, and it should not look like Nova is about to answer. */
+
+.meetingLive {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  max-width: 1100px;
+  margin-inline: auto;
+  padding: 18px 20px 20px;
+}
+
+.meetingLiveHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.meetingLiveIdentity {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.meetingLiveTitle {
+  margin: 0;
+  font-size: 1.12rem;
+  font-weight: 700;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+}
+
+.meetingPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: var(--paper-soft);
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.meetingPill.phase-recording {
+  border-color: #f0b8b0;
+  background: #fdeeeb;
+  color: #a23b28;
+}
+
+.meetingPill.phase-processing,
+.meetingPill.phase-stopping,
+.meetingPill.phase-starting {
+  border-color: var(--border-strong);
+  background: var(--green-mist);
+  color: var(--green-ink);
+}
+
+.meetingPill.phase-error {
+  border-color: #f0b8b0;
+  background: #fdeeeb;
+  color: #a23b28;
+}
+
+/* The recording dot is the one animated thing on this screen. */
+.meetingDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #d1543c;
+  animation: meetingPulse 1.8s ease-in-out infinite;
+}
+
+@keyframes meetingPulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.35;
+    transform: scale(0.82);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .meetingDot {
+    animation: none;
+  }
+}
+
+.meetingProject {
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--green-ink);
+  background: var(--green-soft);
+  border-radius: 999px;
+  padding: 3px 10px;
+}
+
+.meetingProject.none {
+  color: var(--muted);
+  background: var(--paper-soft);
+}
+
+.meetingStopButton {
+  flex: 0 0 auto;
+  border: 1px solid var(--border-strong);
+  background: var(--paper);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 0.84rem;
+  font-weight: 700;
+  padding: 9px 16px;
+  border-radius: 10px;
+  cursor: pointer;
+  box-shadow: var(--shadow-soft);
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.meetingStopButton:hover:not(:disabled) {
+  background: var(--green-mist);
+  border-color: var(--green-deep);
+}
+
+.meetingStopButton:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.meetingLiveNote {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.meetingError {
+  margin: 0;
+  padding: 9px 12px;
+  border-radius: 10px;
+  border: 1px solid #f0b8b0;
+  background: #fdeeeb;
+  color: #a23b28;
+  font-size: 0.82rem;
+}
+
+.meetingTranscript {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--paper);
+  box-shadow: var(--shadow-soft);
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.meetingSegment {
+  display: flex;
+  gap: 14px;
+  margin: 0;
+  font-size: 0.94rem;
+  line-height: 1.6;
+  color: var(--ink);
+}
+
+/* The draft is visibly provisional, so the few seconds of lag reads as
+   "still arriving" rather than as a rendering glitch. */
+.meetingSegment.draft {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.meetingTime {
+  flex: 0 0 auto;
+  width: 3.4rem;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  padding-top: 0.25rem;
+}
+
+.meetingSegment.draft .meetingTime {
+  text-transform: uppercase;
+  font-style: normal;
+}
+
+.meetingText {
+  min-width: 0;
+}
+
+.meetingEmpty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+/* ---- notes card, shown once a meeting has been written up ---- */
+
+.meetingNotesCard {
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto 14px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--paper);
+  box-shadow: var(--shadow-float);
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.meetingNotesHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.meetingNotesEyebrow {
+  display: block;
+  font-size: 0.64rem;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--green-ink);
+  margin-bottom: 4px;
+}
+
+.meetingNotesTitle {
+  margin: 0;
+  font-size: 1.08rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.meetingDismiss {
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 6px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.meetingDismiss:hover {
+  background: var(--paper-soft);
+  color: var(--ink);
+}
+
+.meetingNotesBody {
+  font-size: 0.92rem;
+  line-height: 1.65;
+  color: var(--ink);
+}
+
+.meetingNotesBody > :first-child {
+  margin-top: 0;
+}
+
+.meetingNotesBody > :last-child {
+  margin-bottom: 0;
+}
+
+.meetingNotesGroup h3 {
+  margin: 0 0 7px;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.meetingNotesGroup ul {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+
+.meetingActions {
+  list-style: none;
+  padding-left: 0;
+}
+
+.meetingActions li {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  flex-wrap: wrap;
+  padding: 8px 11px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--paper-soft);
+}
+
+.meetingActionTask {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.meetingActionMeta {
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: var(--green-ink);
+  background: var(--green-soft);
+  border-radius: 999px;
+  padding: 2px 9px;
+}
+
+.meetingActionMeta.due {
+  color: #a05a12;
+  background: #fdf1e0;
+}
+
+/* ---- header toggle ---- */
+
+.meetingToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--border-strong);
+  background: var(--paper);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 0.76rem;
+  font-weight: 700;
+  padding: 6px 13px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.meetingToggle:hover:not(:disabled) {
+  background: var(--green-mist);
+  border-color: var(--green-deep);
+}
+
+.meetingToggle.active {
+  border-color: #e0968a;
+  background: #fdeeeb;
+  color: #a23b28;
+}
+
+.meetingToggle:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.novaHeaderActions {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: 0 0 auto;
+}
+
+.meetingProcessingBanner {
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto 14px;
+  padding: 11px 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--green-mist);
+  color: var(--green-ink);
+  font-size: 0.86rem;
+  font-weight: 600;
+}

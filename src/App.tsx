@@ -4,6 +4,9 @@ import type { ProjectSummary } from './features/nova/components/ConversationHead
 import { ConversationPanel } from './features/nova/components/ConversationPanel'
 import { AuraBackdrop } from './features/nova/components/AuraBackdrop'
 import { MicButton } from './features/nova/components/MicButton'
+import { MeetingLive } from './features/meetings/components/MeetingLive'
+import { MeetingNotesCard } from './features/meetings/components/MeetingNotesCard'
+import { useMeetingMode } from './features/meetings/hooks/useMeetingMode'
 import { useNovaChat } from './features/nova/hooks/useNovaChat'
 import { useNovaRuntime } from './features/nova/hooks/useNovaRuntime'
 import './features/nova/styles/index.css'
@@ -26,6 +29,19 @@ function App() {
     endVoiceAssistantTurn,
   } = useNovaChat()
 
+  const {
+    phase: meetingPhase,
+    meeting,
+    segments: meetingSegments,
+    partial: meetingPartial,
+    error: meetingError,
+    finishedDetail,
+    isRecording: isMeetingRecording,
+    startMeeting,
+    stopMeeting,
+    dismissFinished,
+  } = useMeetingMode()
+
   // Speech feeds the same transcript as chat: the websocket now emits the
   // same structured turn events the chat stream does.
   const handleTurnComplete = useCallback(
@@ -47,6 +63,9 @@ function App() {
     onPartialUserTranscript: updateVoiceDraft,
     onAgentEvent: applyVoiceEvent,
     onTurnComplete: handleTurnComplete,
+    // The meeting recorder needs the microphone to itself, and Nova must not
+    // answer the room while one is running.
+    suspended: isMeetingRecording,
   })
 
   const [projects, setProjects] = useState<ProjectSummary[]>([])
@@ -80,11 +99,26 @@ function App() {
     void loadProjects()
   }, [loadProjects, startNewConversation])
 
+  const handleToggleMeeting = useCallback(() => {
+    if (isMeetingRecording) {
+      void stopMeeting()
+      return
+    }
+    // Meetings inherit the conversation's project, matching what Nova does
+    // when it starts one by voice.
+    void startMeeting({ projectId: project?.id ?? null })
+  }, [isMeetingRecording, project, startMeeting, stopMeeting])
+
+  const isMeetingBusy =
+    meetingPhase === 'starting' ||
+    meetingPhase === 'stopping' ||
+    meetingPhase === 'processing'
+
   return (
     <main className="shell">
       <AuraBackdrop
         uiPhase={uiPhase}
-        isNovaEnabled={isNovaEnabled}
+        isNovaEnabled={isNovaEnabled && !isMeetingRecording}
         voiceLevel={combinedVoiceLevel}
         isStreaming={isStreaming}
       />
@@ -97,25 +131,53 @@ function App() {
           uiPhase={uiPhase}
           isStreaming={isStreaming}
           isNovaEnabled={isNovaEnabled}
+          isMeetingMode={isMeetingRecording}
+          isMeetingBusy={isMeetingBusy}
           onNewConversation={handleNewConversation}
           onTogglePower={() => setNovaPower(!isNovaEnabled)}
+          onToggleMeeting={handleToggleMeeting}
         />
 
-        <ConversationPanel
-          messages={messages}
-          isStreaming={isStreaming}
-          isLoadingHistory={isLoadingHistory}
-          error={chatError}
-          onSend={sendMessage}
-          onStop={stopStreaming}
-          voiceSlot={
-            <MicButton
-              isNovaEnabled={isNovaEnabled}
-              showMicEnableButton={showMicEnableButton}
-              onRetry={retryRuntime}
-            />
-          }
-        />
+        {isMeetingRecording || meetingPhase === 'stopping' ? (
+          // A meeting replaces the conversation rather than sitting beside it:
+          // Nova is not going to answer, and leaving the chat composer in
+          // reach would invite typing into a conversation that is not
+          // listening.
+          <MeetingLive
+            phase={meetingPhase}
+            title={meeting?.title ?? null}
+            projectName={meeting?.project?.name ?? null}
+            segments={meetingSegments}
+            partial={meetingPartial}
+            error={meetingError}
+            onStop={() => void stopMeeting()}
+          />
+        ) : (
+          <ConversationPanel
+            messages={messages}
+            isStreaming={isStreaming}
+            isLoadingHistory={isLoadingHistory}
+            error={chatError}
+            onSend={sendMessage}
+            onStop={stopStreaming}
+            banner={
+              finishedDetail ? (
+                <MeetingNotesCard detail={finishedDetail} onDismiss={dismissFinished} />
+              ) : meetingPhase === 'processing' ? (
+                <p className="meetingProcessingBanner">
+                  Meeting ended. Nova is writing it up…
+                </p>
+              ) : null
+            }
+            voiceSlot={
+              <MicButton
+                isNovaEnabled={isNovaEnabled}
+                showMicEnableButton={showMicEnableButton}
+                onRetry={retryRuntime}
+              />
+            }
+          />
+        )}
       </div>
     </main>
   )

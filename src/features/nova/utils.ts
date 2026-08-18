@@ -29,21 +29,34 @@ export function clearConversationId(): void {
 
 const preferredMimeTypes = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'] as const
 
+export function resolveWsUrlsForPath(path: string): string[] {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const urls = [`${protocol}//${window.location.host}${path}`]
+
+  // Vite dev/preview serve on a different port than the backend; the proxy
+  // handles it, but fall back to the backend directly if it doesn't.
+  if (window.location.port === '5173' || window.location.port === '4173') {
+    urls.push(`${protocol}//127.0.0.1:8000${path}`)
+    urls.push(`${protocol}//localhost:8000${path}`)
+  }
+
+  return Array.from(new Set(urls))
+}
+
 export function resolveWsUrls(): string[] {
   const fromEnv = import.meta.env.VITE_TRANSCRIBE_WS_URL
   if (fromEnv) {
     return [fromEnv as string]
   }
+  return resolveWsUrlsForPath('/ws/transcribe')
+}
 
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  const urls = [`${protocol}//${window.location.host}/ws/transcribe`]
-
-  if (window.location.port === '5173' || window.location.port === '4173') {
-    urls.push(`${protocol}//127.0.0.1:8000/ws/transcribe`)
-    urls.push(`${protocol}//localhost:8000/ws/transcribe`)
+export function resolveMeetingWsUrls(): string[] {
+  const fromEnv = import.meta.env.VITE_MEETING_WS_URL
+  if (fromEnv) {
+    return [fromEnv as string]
   }
-
-  return Array.from(new Set(urls))
+  return resolveWsUrlsForPath('/ws/meeting')
 }
 
 export function bestMimeType() {
