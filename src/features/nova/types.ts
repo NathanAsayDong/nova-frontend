@@ -8,7 +8,7 @@ export type SpeechRecognitionLike = {
   lang: string
   onresult: ((event: { resultIndex: number; results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null
   onend: (() => void) | null
-  onerror: (() => void) | null
+  onerror: ((event: { error?: string }) => void) | null
   start: () => void
   stop: () => void
 }

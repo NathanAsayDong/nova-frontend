@@ -51,6 +51,12 @@ type UseMeetingModeResult = {
   /** Notes, once the finished meeting has been written up. */
   finishedDetail: MeetingDetail | null
   isRecording: boolean
+  /**
+   * The meeting view should be on screen: recording, writing up, or showing
+   * the finished notes. One view for the whole lifecycle, so stopping does
+   * not bounce the user to chat and back.
+   */
+  isMeetingViewOpen: boolean
   startMeeting: (input?: { title?: string; projectId?: number | null }) => Promise<void>
   stopMeeting: () => Promise<void>
   dismissFinished: () => void
@@ -328,8 +334,10 @@ export function useMeetingMode(): UseMeetingModeResult {
           return
         }
         if (detail.notes || detail.meeting.status === 'failed') {
+          // Keep `meeting` set: the view still shows its title and project
+          // alongside the notes until the user is done reading.
           setFinishedDetail(detail)
-          setMeeting(null)
+          setMeeting(detail.meeting)
           setPhase('off')
         }
       } catch {
@@ -355,9 +363,15 @@ export function useMeetingMode(): UseMeetingModeResult {
     error,
     finishedDetail,
     isRecording: phase === 'recording' || phase === 'starting',
+    isMeetingViewOpen: phase !== 'off' || finishedDetail !== null,
     startMeeting,
     stopMeeting,
-    dismissFinished: () => setFinishedDetail(null),
+    dismissFinished: () => {
+      setFinishedDetail(null)
+      setMeeting(null)
+      setSegments([])
+      setPartial('')
+    },
     clearError: () => setError(null),
   }
 }

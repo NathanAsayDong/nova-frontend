@@ -10,8 +10,6 @@ type ConversationPanelProps = {
   error: string
   /** Voice indicator, rendered inside the composer. */
   voiceSlot?: ReactNode
-  /** Pinned above the transcript — meeting notes, processing status. */
-  banner?: ReactNode
   onSend: (text: string) => void
   onStop: () => void
 }
@@ -22,7 +20,6 @@ export function ConversationPanel({
   isLoadingHistory,
   error,
   voiceSlot,
-  banner,
   onSend,
   onStop,
 }: ConversationPanelProps) {
@@ -60,8 +57,6 @@ export function ConversationPanel({
   return (
     <section className="conversationPanel">
       <div className="conversationScroll" ref={scrollRef} onScroll={handleScroll}>
-        {banner}
-
         {isLoadingHistory ? <p className="conversationNotice">Loading history…</p> : null}
 
         {/* Empty state: hint and any error sit together, centered. */}

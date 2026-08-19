@@ -1,8 +1,12 @@
 /* Meeting mode. Same paper-and-green language as the conversation surface,
    but deliberately cooler and flatter: this is a view you read, not one you
-   talk to, and it should not look like Nova is about to answer. */
+   talk to, and it should not look like Nova is about to answer.
 
-.meetingLive {
+   Content width matches the conversation (1100px) so switching modes does not
+   look like switching applications. */
+
+.meetingView,
+.meetingsPanel {
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -14,15 +18,28 @@
   padding: 18px 20px 20px;
 }
 
-.meetingLiveHeader {
+.meetingViewHeader,
+.meetingsPanelHeader {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 16px;
   flex-wrap: wrap;
 }
 
-.meetingLiveIdentity {
+.meetingsPanelHeader {
+  justify-content: flex-start;
+}
+
+.meetingsPanelTitle {
+  margin: 0;
+  flex: 1 1 auto;
+  font-size: 1.12rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.meetingViewIdentity {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -30,7 +47,7 @@
   min-width: 0;
 }
 
-.meetingLiveTitle {
+.meetingViewTitle {
   margin: 0;
   font-size: 1.12rem;
   font-weight: 700;
@@ -68,7 +85,8 @@
   color: var(--green-ink);
 }
 
-.meetingPill.phase-error {
+.meetingPill.phase-error,
+.meetingPill.phase-failed {
   border-color: #f0b8b0;
   background: #fdeeeb;
   color: #a23b28;
@@ -108,6 +126,7 @@
   background: var(--green-soft);
   border-radius: 999px;
   padding: 3px 10px;
+  white-space: nowrap;
 }
 
 .meetingProject.none {
@@ -115,32 +134,66 @@
   background: var(--paper-soft);
 }
 
-.meetingStopButton {
+/* ---- buttons ---- */
+
+.meetingPrimaryButton,
+.meetingGhostButton,
+.meetingDangerButton {
   flex: 0 0 auto;
+  font-family: inherit;
+  font-weight: 700;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.meetingPrimaryButton {
   border: 1px solid var(--border-strong);
   background: var(--paper);
   color: var(--ink);
-  font-family: inherit;
   font-size: 0.84rem;
-  font-weight: 700;
   padding: 9px 16px;
-  border-radius: 10px;
-  cursor: pointer;
   box-shadow: var(--shadow-soft);
-  transition: background 0.15s ease, border-color 0.15s ease;
 }
 
-.meetingStopButton:hover:not(:disabled) {
+.meetingPrimaryButton:hover:not(:disabled) {
   background: var(--green-mist);
   border-color: var(--green-deep);
 }
 
-.meetingStopButton:disabled {
+.meetingPrimaryButton:disabled {
   opacity: 0.5;
   cursor: default;
 }
 
-.meetingLiveNote {
+.meetingGhostButton {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.78rem;
+  padding: 7px 13px;
+}
+
+.meetingGhostButton:hover {
+  background: var(--paper-soft);
+  color: var(--ink);
+}
+
+.meetingGhostButton.danger:hover {
+  color: #a23b28;
+  border-color: #e0968a;
+  background: #fdeeeb;
+}
+
+.meetingDangerButton {
+  border: 1px solid #e0968a;
+  background: #fdeeeb;
+  color: #a23b28;
+  font-size: 0.78rem;
+  padding: 7px 13px;
+}
+
+.meetingViewNote {
   margin: 0;
   font-size: 0.8rem;
   color: var(--muted);
@@ -156,7 +209,10 @@
   font-size: 0.82rem;
 }
 
-.meetingTranscript {
+/* ---- scrolling body, shared by the live view and the panel ---- */
+
+.meetingScroll,
+.meetingsPanelBody {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
@@ -212,66 +268,25 @@
   font-size: 0.88rem;
 }
 
-/* ---- notes card, shown once a meeting has been written up ---- */
+/* ---- notes ---- */
 
-.meetingNotesCard {
-  width: 100%;
-  max-width: 760px;
-  margin: 0 auto 14px;
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  background: var(--paper);
-  box-shadow: var(--shadow-float);
-  padding: 18px 20px;
+.meetingSectionHeading {
+  margin: 6px 0 0;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.meetingNotesBlock {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-}
-
-.meetingNotesHeader {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.meetingNotesEyebrow {
-  display: block;
-  font-size: 0.64rem;
-  font-weight: 800;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--green-ink);
-  margin-bottom: 4px;
-}
-
-.meetingNotesTitle {
-  margin: 0;
-  font-size: 1.08rem;
-  font-weight: 700;
-  color: var(--ink);
-}
-
-.meetingDismiss {
-  flex: 0 0 auto;
-  border: 1px solid var(--border);
-  background: transparent;
-  color: var(--muted);
-  font-family: inherit;
-  font-size: 0.78rem;
-  font-weight: 700;
-  padding: 6px 12px;
-  border-radius: 8px;
-  cursor: pointer;
-}
-
-.meetingDismiss:hover {
-  background: var(--paper-soft);
-  color: var(--ink);
+  gap: 10px;
 }
 
 .meetingNotesBody {
-  font-size: 0.92rem;
+  font-size: 0.94rem;
   line-height: 1.65;
   color: var(--ink);
 }
@@ -284,28 +299,23 @@
   margin-bottom: 0;
 }
 
-.meetingNotesGroup h3 {
-  margin: 0 0 7px;
-  font-size: 0.68rem;
-  font-weight: 800;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-
-.meetingNotesGroup ul {
+.meetingNotesList {
   margin: 0;
   padding-left: 20px;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  font-size: 0.9rem;
+  font-size: 0.92rem;
   line-height: 1.55;
 }
 
 .meetingActions {
   list-style: none;
+  margin: 0;
   padding-left: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .meetingActions li {
@@ -317,6 +327,7 @@
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--paper-soft);
+  font-size: 0.9rem;
 }
 
 .meetingActionTask {
@@ -338,38 +349,186 @@
   background: #fdf1e0;
 }
 
-/* ---- header toggle ---- */
-
-.meetingToggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  border: 1px solid var(--border-strong);
-  background: var(--paper);
-  color: var(--ink);
-  font-family: inherit;
-  font-size: 0.76rem;
-  font-weight: 700;
-  padding: 6px 13px;
-  border-radius: 999px;
-  cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+.meetingTranscriptBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding-top: 4px;
 }
 
-.meetingToggle:hover:not(:disabled) {
-  background: var(--green-mist);
+/* ---- start form ---- */
+
+.meetingStartForm {
+  width: 100%;
+  max-width: 1100px;
+  margin: 14px auto 0;
+  padding: 16px 18px;
+  display: flex;
+  align-items: flex-end;
+  gap: 14px;
+  flex-wrap: wrap;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--paper);
+  box-shadow: var(--shadow-soft);
+}
+
+.meetingField {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+.meetingField.wide {
+  flex: 2 1 280px;
+}
+
+.meetingFieldLabel {
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* Inputs and selects share one look. An explicit height is what keeps them
+   matched: a native select is a couple of pixels taller than an input at the
+   same padding, and because the fields are bottom-aligned in a row, that
+   difference pushed their labels out of line with each other. */
+.meetingInput {
+  font-family: inherit;
+  font-size: 0.9rem;
+  line-height: 1.2;
+  color: var(--ink);
+  height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background-color: var(--paper);
+  min-width: 0;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.meetingInput::placeholder {
+  color: var(--muted);
+}
+
+.meetingInput:hover {
   border-color: var(--green-deep);
 }
 
-.meetingToggle.active {
-  border-color: #e0968a;
-  background: #fdeeeb;
-  color: #a23b28;
+.meetingInput:focus-visible {
+  outline: none;
+  border-color: var(--green-deep);
+  box-shadow: 0 0 0 3px var(--green-soft);
 }
 
-.meetingToggle:disabled {
-  opacity: 0.55;
-  cursor: default;
+/* The native select chrome is a grey OS-drawn arrow that belongs to no part
+   of this design, so it is replaced with a chevron drawn in the muted ink.
+   Inlined as a data URI: the app has no icon pipeline and this must not
+   become a network request. */
+select.meetingInput {
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+  padding-right: 34px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5 11 1.5' fill='none' stroke='%236b8577' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 12px 8px;
+  text-overflow: ellipsis;
+}
+
+/* Buttons that sit on a row with fields take the field height, so the row
+   reads as one control strip rather than three things that happen to be
+   bottom-aligned. */
+.meetingFormActions {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: 0 0 auto;
+}
+
+.meetingFormActions .meetingPrimaryButton,
+.meetingFormActions .meetingGhostButton,
+.meetingDetailControls .meetingGhostButton,
+.meetingDetailControls .meetingDangerButton {
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  padding-block: 0;
+}
+
+/* ---- meetings list ---- */
+
+.meetingsList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.meetingsListItem {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  text-align: left;
+  font-family: inherit;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--paper-soft);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.meetingsListItem:hover {
+  border-color: var(--green-deep);
+  background: var(--green-mist);
+}
+
+.meetingsListTitle {
+  font-size: 0.96rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.meetingsListMeta {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.meetingDetail {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.meetingDetailControls {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.meetingDeleteConfirm {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+  font-size: 0.82rem;
+  color: var(--ink);
 }
 
 .novaHeaderActions {
@@ -390,4 +549,56 @@
   color: var(--green-ink);
   font-size: 0.86rem;
   font-weight: 600;
+}
+
+/* ---- header toggles ----
+   These sit beside "New conversation" in the header, so they take the same
+   shape as .headerButton rather than inventing a second button language.
+   Only the two real states depart from it: the meetings panel being open,
+   and a meeting actually recording. */
+
+.meetingToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--border-strong);
+  background: var(--paper);
+  color: var(--green-ink);
+  border-radius: 999px;
+  padding: 6px 16px;
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
+}
+
+.meetingToggle:hover:not(:disabled) {
+  background: var(--green-soft);
+  border-color: var(--green);
+}
+
+/* The meetings panel is the current view. */
+.meetingToggle.open {
+  background: var(--green-soft);
+  border-color: var(--green);
+}
+
+/* Recording is not just another active button — it is a state the room is in,
+   and it earns the one warm colour in this header. */
+.meetingToggle.active {
+  border-color: #e0968a;
+  background: #fdeeeb;
+  color: #a23b28;
+}
+
+.meetingToggle.active:hover:not(:disabled) {
+  background: #fbe2dd;
+  border-color: #d1543c;
+}
+
+.meetingToggle:disabled {
+  opacity: 0.55;
+  cursor: default;
 }

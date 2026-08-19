@@ -20,9 +20,11 @@ type ConversationHeaderProps = {
   isMeetingMode: boolean
   /** Blocks the toggle while a meeting is starting or being written up. */
   isMeetingBusy: boolean
+  isMeetingsPanelOpen: boolean
   onNewConversation: () => void
   onTogglePower: () => void
   onToggleMeeting: () => void
+  onToggleMeetingsPanel: () => void
 }
 
 const PHASE_LABEL: Record<UiPhase, string> = {
@@ -41,9 +43,11 @@ export function ConversationHeader({
   isNovaEnabled,
   isMeetingMode,
   isMeetingBusy,
+  isMeetingsPanelOpen,
   onNewConversation,
   onTogglePower,
   onToggleMeeting,
+  onToggleMeetingsPanel,
 }: ConversationHeaderProps) {
   const [showProjects, setShowProjects] = useState(false)
 
@@ -92,6 +96,16 @@ export function ConversationHeader({
         </div>
 
         <div className="novaHeaderActions">
+          <button
+            type="button"
+            className={`meetingToggle ${isMeetingsPanelOpen ? 'open' : ''}`}
+            onClick={onToggleMeetingsPanel}
+            aria-pressed={isMeetingsPanelOpen}
+            title="Past meetings, notes, and transcripts"
+          >
+            Meetings
+          </button>
+
           <button
             type="button"
             className={`meetingToggle ${isMeetingMode ? 'active' : ''}`}

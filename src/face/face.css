@@ -1,0 +1,237 @@
+:root {
+  --face-green: #22c55e;
+  --face-green-dim: #14532d;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+.faceScreen {
+  height: 100%;
+  display: grid;
+  place-items: center;
+  background: #000000;
+  overflow: hidden;
+}
+
+.face {
+  width: min(92vw, 92vh);
+  height: min(92vw, 92vh);
+  user-select: none;
+}
+
+/* The whole face breathes gently so it never looks frozen. */
+.faceInner {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: breathe 4.5s ease-in-out infinite;
+}
+
+.mode-off .faceInner {
+  animation: none;
+}
+
+@keyframes breathe {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.014);
+  }
+}
+
+/* ---------- Eyes ---------- */
+
+.eye {
+  fill: var(--face-green);
+  transform-box: fill-box;
+  transform-origin: center;
+  transition:
+    transform 0.16s ease,
+    fill 0.5s ease;
+}
+
+.eyes {
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: transform 0.45s ease;
+}
+
+/* Idle: occasional soft glance to the side. */
+.mode-idle .eyes {
+  animation: glance 9s ease-in-out infinite;
+}
+
+@keyframes glance {
+  0%,
+  55%,
+  100% {
+    transform: translateX(0);
+  }
+  60%,
+  72% {
+    transform: translateX(-22px);
+  }
+  78% {
+    transform: translateX(0);
+  }
+}
+
+/* Listening: eyes widen and lift — attentive. */
+.mode-listening .eye {
+  transform: translateY(-14px) scale(1.16);
+}
+
+/* Thinking: eyes drift up and away, slightly narrowed, wandering. */
+.mode-thinking .eyes {
+  transform: translate(36px, -44px);
+  animation: wander 5.5s ease-in-out infinite;
+}
+
+.mode-thinking .eye {
+  transform: scale(0.88);
+}
+
+@keyframes wander {
+  0%,
+  100% {
+    transform: translate(36px, -44px);
+  }
+  40% {
+    transform: translate(-26px, -50px);
+  }
+  70% {
+    transform: translate(30px, -30px);
+  }
+}
+
+/* Meeting: focused, half-lidded. */
+.mode-meeting .eye {
+  transform: scaleY(0.66);
+}
+
+/* Off: asleep — thin dim lines. */
+.mode-off .eye {
+  fill: var(--face-green-dim);
+  transform: scaleY(0.1);
+}
+
+/* Blink wins over everything; quick squash. */
+.face.blinking .eye {
+  transform: scaleY(0.08) !important;
+  transition: transform 0.06s ease;
+}
+
+/* Loud passages squint the eyes a touch (talking only). */
+.mode-talking .eye {
+  transition: transform 0.2s ease;
+}
+
+/* ---------- Mouths ---------- */
+
+.mouth {
+  transform-box: fill-box;
+  transform-origin: center;
+  transition:
+    opacity 0.25s ease,
+    transform 0.35s ease;
+  opacity: 0;
+}
+
+.smile {
+  fill: none;
+  stroke: var(--face-green);
+  stroke-width: 36;
+  stroke-linecap: round;
+}
+
+.flatLine,
+.oMouth,
+.talkMouth {
+  fill: var(--face-green);
+}
+
+.talkMouth {
+  transition:
+    opacity 0.25s ease,
+    x 0.07s ease-out,
+    y 0.07s ease-out,
+    width 0.07s ease-out,
+    height 0.07s ease-out,
+    rx 0.07s ease-out;
+}
+
+/* Which mouth each mode shows. */
+.mode-idle .smile,
+.mode-listening .oMouth,
+.mode-talking .talkMouth {
+  opacity: 1;
+}
+
+.mode-meeting .smile {
+  opacity: 1;
+  transform: scale(0.8, 0.5);
+}
+
+.mode-thinking .flatLine {
+  opacity: 1;
+  transform: translateX(30px) scaleX(0.9);
+}
+
+.mode-off .flatLine {
+  opacity: 1;
+  fill: var(--face-green-dim);
+  transform: scaleX(1.5);
+}
+
+/* ---------- Meeting recording dot ---------- */
+
+.recDot {
+  opacity: 0;
+  transition: opacity 0.35s ease;
+}
+
+.mode-meeting .recDot {
+  opacity: 1;
+}
+
+.recCore {
+  fill: var(--face-green);
+  animation: recPulse 1.6s ease-in-out infinite;
+}
+
+.recRing {
+  fill: none;
+  stroke: var(--face-green);
+  stroke-width: 3;
+  opacity: 0.4;
+  animation: recPulse 1.6s ease-in-out infinite;
+}
+
+@keyframes recPulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* ---------- Connection state ---------- */
+
+.connectionNote {
+  position: fixed;
+  bottom: 24px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  color: var(--face-green-dim);
+  font-family: 'Nunito', 'Avenir Next', 'Segoe UI', sans-serif;
+  font-size: 14px;
+  letter-spacing: 0.08em;
+}

@@ -58,6 +58,23 @@ export async function fetchMeetings(limit = 20): Promise<Meeting[]> {
   return body.meetings
 }
 
+export async function updateMeeting(
+  uuid: string,
+  changes: { title?: string; projectId?: number | null; clearProject?: boolean },
+): Promise<Meeting> {
+  const response = await fetch(`/meetings/${uuid}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(changes),
+  })
+  const body = await readJson<{ meeting: Meeting }>(response)
+  return body.meeting
+}
+
+export async function deleteMeeting(uuid: string): Promise<void> {
+  await readJson(await fetch(`/meetings/${uuid}`, { method: 'DELETE' }))
+}
+
 export async function fetchMeetingSegments(
   uuid: string,
 ): Promise<{ startMs: number; endMs: number; text: string }[]> {

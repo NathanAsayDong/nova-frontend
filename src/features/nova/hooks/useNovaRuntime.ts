@@ -23,6 +23,7 @@ import {
   silenceTimeoutMs,
   speechThreshold,
 } from '../utils'
+import { publishFaceLevel } from '../../face/publisher'
 
 type UseNovaRuntimeResult = {
   isNovaEnabled: boolean
@@ -87,15 +88,18 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
   const analysisFrameRef = useRef<number | null>(null)
   const analysisDataRef = useRef<Uint8Array<ArrayBuffer> | null>(null)
   const agentAudioContextRef = useRef<AudioContext | null>(null)
-  const agentAnalyserRef = useRef<AnalyserNode | null>(null)
+  const agentMeterNodeRef = useRef<AudioWorkletNode | null>(null)
   const agentSourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null)
-  const agentAnalysisFrameRef = useRef<number | null>(null)
-  const agentAnalysisDataRef = useRef<Uint8Array<ArrayBuffer> | null>(null)
+  // Resolves true once the worklet graph is loaded; false if it failed and
+  // playback should fall back to a plain element->destination connection.
+  const agentGraphReadyRef = useRef<Promise<boolean> | null>(null)
+  const agentLevelSmoothedRef = useRef(0)
   const activeAgentAudioRef = useRef<HTMLAudioElement | null>(null)
   const activePlaybackDoneRef = useRef<(() => void) | null>(null)
   const suppressAssistantAudioUntilNextTurnRef = useRef(false)
 
   const speechRecognitionRef = useRef<SpeechRecognitionLike | null>(null)
+  const wakeRestartTimerRef = useRef<number | null>(null)
   const wakeDetectModeRef = useRef<'browser' | 'disabled'>('disabled')
   const uiPhaseRef = useRef<UiPhase>('idle')
   const isInitInFlightRef = useRef(false)
@@ -206,28 +210,30 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
   }
 
   const cleanupAgentAudioAnalysis = () => {
-    if (agentAnalysisFrameRef.current !== null) {
-      cancelAnimationFrame(agentAnalysisFrameRef.current)
-      agentAnalysisFrameRef.current = null
-    }
-
+    // Only detach the finished clip; the context and meter node live for the
+    // whole session so the worklet never reloads between clips.
     if (agentSourceNodeRef.current) {
       agentSourceNodeRef.current.disconnect()
       agentSourceNodeRef.current = null
     }
 
-    if (agentAnalyserRef.current) {
-      agentAnalyserRef.current.disconnect()
-      agentAnalyserRef.current = null
-    }
+    agentLevelSmoothedRef.current = 0
+    setAgentAudioLevel(0)
+    publishFaceLevel(0)
+  }
 
+  const closeAgentAudioGraph = () => {
+    cleanupAgentAudioAnalysis()
+    if (agentMeterNodeRef.current) {
+      agentMeterNodeRef.current.port.onmessage = null
+      agentMeterNodeRef.current.disconnect()
+      agentMeterNodeRef.current = null
+    }
     if (agentAudioContextRef.current) {
       void agentAudioContextRef.current.close()
       agentAudioContextRef.current = null
     }
-
-    agentAnalysisDataRef.current = null
-    setAgentAudioLevel(0)
+    agentGraphReadyRef.current = null
   }
 
   const cleanupAudioUrl = () => {
@@ -282,6 +288,11 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
   }
 
   const stopWakeRecognition = () => {
+    if (wakeRestartTimerRef.current !== null) {
+      window.clearTimeout(wakeRestartTimerRef.current)
+      wakeRestartTimerRef.current = null
+    }
+
     const recognition = speechRecognitionRef.current
     if (!recognition) {
       return
@@ -507,51 +518,61 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
     audioQueueRef.current.push({ kind: 'stream', streamId })
   }
 
-  const startAgentAudioAnalysis = (audio: HTMLAudioElement) => {
+  const ensureAgentAudioGraph = (): Promise<boolean> => {
+    if (!agentGraphReadyRef.current) {
+      agentGraphReadyRef.current = (async () => {
+        // One long-lived context for all agent playback. The level meter runs
+        // as an AudioWorklet on the audio thread, so the face tab (and the
+        // aura) keep getting levels even while this tab is hidden — a rAF
+        // loop would freeze the mouth the moment the tab loses visibility.
+        const audioContext = new window.AudioContext()
+        agentAudioContextRef.current = audioContext
+        try {
+          await audioContext.audioWorklet.addModule('/level-meter-worklet.js')
+          const meter = new AudioWorkletNode(audioContext, 'level-meter')
+          meter.connect(audioContext.destination)
+          meter.port.onmessage = (event: MessageEvent<number>) => {
+            const raw = event.data
+            const current = agentLevelSmoothedRef.current
+            // Fast attack, slow release: consonants pop, decays feel natural.
+            const rate = raw > current ? 0.55 : 0.25
+            const smoothed = current + (raw - current) * rate
+            agentLevelSmoothedRef.current = smoothed
+            setAgentAudioLevel(smoothed)
+            publishFaceLevel(smoothed)
+          }
+          agentMeterNodeRef.current = meter
+          return true
+        } catch {
+          // No metering, but audio still must play: clips connect straight
+          // to the destination instead.
+          return false
+        }
+      })()
+    }
+    return agentGraphReadyRef.current
+  }
+
+  const startAgentAudioAnalysis = async (audio: HTMLAudioElement) => {
     cleanupAgentAudioAnalysis()
 
+    const hasMeter = await ensureAgentAudioGraph()
+    const audioContext = agentAudioContextRef.current
+    if (!audioContext) {
+      return
+    }
+
     try {
-      const audioContext = new window.AudioContext()
-      const analyser = audioContext.createAnalyser()
-      const source = audioContext.createMediaElementSource(audio)
-
-      analyser.fftSize = 1024
-      analyser.smoothingTimeConstant = 0.82
-
-      source.connect(analyser)
-      analyser.connect(audioContext.destination)
-
-      agentAudioContextRef.current = audioContext
-      agentAnalyserRef.current = analyser
-      agentSourceNodeRef.current = source
-      agentAnalysisDataRef.current = new Uint8Array<ArrayBuffer>(new ArrayBuffer(analyser.fftSize))
-
-      let smoothed = 0
-      const tick = () => {
-        const activeAnalyser = agentAnalyserRef.current
-        const activeData = agentAnalysisDataRef.current
-
-        if (!activeAnalyser || !activeData) {
-          return
-        }
-
-        activeAnalyser.getByteTimeDomainData(activeData)
-
-        let sumSquares = 0
-        for (let i = 0; i < activeData.length; i += 1) {
-          const normalized = (activeData[i] - 128) / 128
-          sumSquares += normalized * normalized
-        }
-
-        const rms = Math.sqrt(sumSquares / activeData.length)
-        const amplified = Math.min(1, rms * 4.4)
-        smoothed += (amplified - smoothed) * 0.2
-        setAgentAudioLevel(smoothed)
-
-        agentAnalysisFrameRef.current = requestAnimationFrame(tick)
+      if (audioContext.state === 'suspended') {
+        void audioContext.resume()
       }
-
-      agentAnalysisFrameRef.current = requestAnimationFrame(tick)
+      const source = audioContext.createMediaElementSource(audio)
+      if (hasMeter && agentMeterNodeRef.current) {
+        source.connect(agentMeterNodeRef.current)
+      } else {
+        source.connect(audioContext.destination)
+      }
+      agentSourceNodeRef.current = source
     } catch {
       setAgentAudioLevel(0)
     }
@@ -571,7 +592,7 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
       currentAudioUrlRef.current = streamUrl
       const audio = new Audio(streamUrl)
       activeAgentAudioRef.current = audio
-      startAgentAudioAnalysis(audio)
+      await startAgentAudioAnalysis(audio)
       await audio.play()
       await new Promise<void>((resolve) => {
         const finish = () => {
@@ -599,7 +620,11 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
 
     const audio = new Audio(audioUrl)
     activeAgentAudioRef.current = audio
-    startAgentAudioAnalysis(audio)
+    // Kick off the meter hookup but do NOT await it yet: 'sourceopen' can
+    // fire while the worklet module is still loading, and a listener attached
+    // after the fact would leave this promise — and the whole speaking
+    // phase — hanging forever.
+    const analysisReady = startAgentAudioAnalysis(audio)
 
     const sourceBuffer = await new Promise<SourceBuffer>((resolve, reject) => {
       const onOpen = () => {
@@ -612,11 +637,17 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
         }
       }
 
+      if (mediaSource.readyState === 'open') {
+        onOpen()
+        return
+      }
       mediaSource.addEventListener('sourceopen', onOpen, { once: true })
       mediaSource.addEventListener('error', () => reject(new Error('MediaSource error.')), {
         once: true,
       })
     })
+
+    await analysisReady
 
     let playTriggered = false
     const appendChunk = async (chunk: ArrayBuffer) =>
@@ -803,19 +834,42 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
     }
 
     recognition.onend = () => {
-      if (!speechRecognitionRef.current) {
+      // Deliberately stopped (power off, meeting mode) — stay stopped.
+      if (speechRecognitionRef.current !== recognition) {
         return
       }
-      try {
-        recognition.start()
-      } catch {
-        // noop
-      }
+      speechRecognitionRef.current = null
+      recognition.onresult = null
+      recognition.onend = null
+      recognition.onerror = null
+
+      // Chrome ends continuous sessions on its own after silence or a
+      // recognizer recycle. Restart with a fresh instance — reusing the
+      // ended one can throw "already started" on some platforms — after a
+      // short delay so an error/end loop can't spin hot.
+      wakeRestartTimerRef.current = window.setTimeout(() => {
+        wakeRestartTimerRef.current = null
+        if (
+          !isNovaEnabledRef.current ||
+          isShuttingDownRef.current ||
+          speechRecognitionRef.current
+        ) {
+          return
+        }
+        maybeStartWakeRecognition()
+      }, 300)
     }
 
-    recognition.onerror = () => {
-      wakeDetectModeRef.current = 'disabled'
-      stopWakeRecognition()
+    recognition.onerror = (event) => {
+      // Only mic-permission failures are terminal. Everything else Chrome
+      // throws routinely (no-speech after silence, network, aborted) is
+      // recoverable: leave the ref in place so onend restarts a fresh
+      // session. Disabling here is what used to kill "nova" after a long
+      // idle stretch.
+      if (event?.error === 'not-allowed' || event?.error === 'service-not-allowed') {
+        wakeDetectModeRef.current = 'disabled'
+        stopWakeRecognition()
+      }
     }
 
     try {
@@ -1316,7 +1370,7 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
       streamBuffers.clear()
       stopActiveAgentAudioPlayback()
       cleanupMedia()
-      cleanupAgentAudioAnalysis()
+      closeAgentAudioGraph()
       closeSocket()
       cleanupAudioUrl()
       if (bootupCueAudioRef.current) {
