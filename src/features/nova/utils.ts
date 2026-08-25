@@ -36,8 +36,8 @@ export function resolveWsUrlsForPath(path: string): string[] {
   // Vite dev/preview serve on a different port than the backend; the proxy
   // handles it, but fall back to the backend directly if it doesn't.
   if (window.location.port === '5173' || window.location.port === '4173') {
-    urls.push(`${protocol}//127.0.0.1:8000${path}`)
-    urls.push(`${protocol}//localhost:8000${path}`)
+    const apiUrl = import.meta.env.VITE_API_URL || 'http://10.1.10.118:8000'
+    urls.push(`${protocol}//${new URL(apiUrl).host}${path}`)
   }
 
   return Array.from(new Set(urls))

@@ -31,43 +31,58 @@ function facePath(): Plugin {
   }
 }
 
-export default defineConfig({
-  plugins: [react(), babel({ presets: [reactCompilerPreset()] }), facePath()],
-  build: {
-    rollupOptions: {
-      input: {
-        main: fileURLToPath(new URL('./index.html', import.meta.url)),
-        face: fileURLToPath(new URL('./face.html', import.meta.url)),
+const localApiUrl = 'http://127.0.0.1:8000'
+const remoteApiUrl = 'http://10.1.10.118:8000'
+
+function resolveApiUrl(mode: string): string {
+  if (process.env.VITE_API_URL) {
+    return process.env.VITE_API_URL
+  }
+  return mode === 'localhost' ? localApiUrl : remoteApiUrl
+}
+
+export default defineConfig(({ mode }) => {
+  const apiUrl = resolveApiUrl(mode)
+  process.env.VITE_API_URL = apiUrl
+
+  return {
+    plugins: [react(), babel({ presets: [reactCompilerPreset()] }), facePath()],
+    build: {
+      rollupOptions: {
+        input: {
+          main: fileURLToPath(new URL('./index.html', import.meta.url)),
+          face: fileURLToPath(new URL('./face.html', import.meta.url)),
+        },
       },
     },
-  },
-  server: {
-    proxy: {
-      '/ws': {
-        target: 'http://127.0.0.1:8000',
-        ws: true,
-      },
-      '/tools': {
-        target: 'http://127.0.0.1:8000',
-      },
-      '/chat': {
-        target: 'http://127.0.0.1:8000',
-      },
-      '/conversations': {
-        target: 'http://127.0.0.1:8000',
-      },
-      '/projects': {
-        target: 'http://127.0.0.1:8000',
-      },
-      '/mcp-servers': {
-        target: 'http://127.0.0.1:8000',
-      },
-      '/nova': {
-        target: 'http://127.0.0.1:8000',
-      },
-      '/meetings': {
-        target: 'http://127.0.0.1:8000',
+    server: {
+      proxy: {
+        '/ws': {
+          target: apiUrl,
+          ws: true,
+        },
+        '/tools': {
+          target: apiUrl,
+        },
+        '/chat': {
+          target: apiUrl,
+        },
+        '/conversations': {
+          target: apiUrl,
+        },
+        '/projects': {
+          target: apiUrl,
+        },
+        '/mcp-servers': {
+          target: apiUrl,
+        },
+        '/nova': {
+          target: apiUrl,
+        },
+        '/meetings': {
+          target: apiUrl,
+        },
       },
     },
-  },
+  }
 })
