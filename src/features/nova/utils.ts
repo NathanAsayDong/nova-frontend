@@ -1,6 +1,3 @@
-export const speechThreshold = 0.018
-export const silenceTimeoutMs = 1000
-
 const conversationIdStorageKey = 'nova.conversationId'
 
 export function loadConversationId(): string | null {

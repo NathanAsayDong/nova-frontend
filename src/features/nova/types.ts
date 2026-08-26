@@ -15,7 +15,10 @@ export type SpeechRecognitionLike = {
 
 export type SocketEvent =
   | { type: 'ready'; message: string }
-  | { type: 'listening'; message: string }
+  // `endpointMs` is the starting silence window for the turn, before any
+  // transcript exists to score. Owned by the backend so the windows have a
+  // single source of truth.
+  | { type: 'listening'; message: string; endpointMs?: number }
   | { type: 'chunk_received'; count: number; bytes: number }
   | {
       type: 'assistant_audio_stream_start'
@@ -53,7 +56,17 @@ export type SocketEvent =
   | { type: 'pong' }
   // Speech and chat share one conversation, so the socket carries the same
   // structured turn events the chat stream does.
-  | { type: 'partial_transcript'; text: string; seq: number }
+  // Live caption, plus the revised silence window for the utterance so far:
+  // how long the client should wait out silence before calling the turn over,
+  // given what has been said. Short for a finished sentence, long for one that
+  // trails off mid-thought. `endpointReason` is the evidence, for debugging.
+  | {
+      type: 'partial_transcript'
+      text: string
+      seq: number
+      endpointMs?: number
+      endpointReason?: string
+    }
   | { type: 'user_transcript'; text: string; conversationId: string }
   | { type: 'text_final'; text: string; format?: string; conversationId: string }
   // Pre-tool acknowledgment: spoken via the TTS stream and shown as a

@@ -20,9 +20,8 @@ import {
   loadConversationId,
   resolveWsUrls,
   saveConversationId,
-  silenceTimeoutMs,
-  speechThreshold,
 } from '../utils'
+import { createTurnDetector, type TurnDetector } from '../turnDetector'
 import { publishFaceLevel } from '../../face/publisher'
 
 type UseNovaRuntimeResult = {
@@ -108,8 +107,21 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
   const capturePurposeRef = useRef<CapturePurpose>('none')
   const captureStartedRef = useRef(false)
   const pendingStopPurposeRef = useRef<Exclude<CapturePurpose, 'none'> | null>(null)
-  const hasSpeechInCurrentTurnRef = useRef(false)
-  const lastSpeechAtRef = useRef<number>(Date.now())
+
+  // Turn detection. The detector runs inside the analyser's animation frame
+  // and calls back on transitions only, so it never re-renders this hook while
+  // the user is mid-sentence. Its handlers are reached through a ref because
+  // the detector outlives the render that created it.
+  const turnDetectorRef = useRef<TurnDetector | null>(null)
+  const turnHandlersRef = useRef<{
+    onSpeechOnset: () => void
+    onSpeechStart: () => void
+    onSpeechPause: () => void
+    onSpeechResume: () => void
+    onSpeechAbort: () => void
+    onTurnEnd: () => void
+  } | null>(null)
+  const [isSpeaking, setIsSpeaking] = useState(false)
 
   const pendingWakeListeningRef = useRef(false)
   const pendingFollowUpListeningRef = useRef(false)
@@ -150,14 +162,15 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
     [audioLevel, agentAudioLevel],
   )
 
-  const hasSpeechInput = uiPhase === 'listening' && audioLevel > speechThreshold
+  const hasSpeechInput = uiPhase === 'listening' && isSpeaking
 
-  const clearRuntimeTimers = () => {
-    hasSpeechInCurrentTurnRef.current = false
+  const resetTurnDetection = () => {
+    turnDetectorRef.current?.reset()
+    setIsSpeaking(false)
   }
 
   const setIdle = (message = 'Idle.') => {
-    clearRuntimeTimers()
+    resetTurnDetection()
     uiPhaseRef.current = 'idle'
     setUiPhase('idle')
     setStatusMessage(message)
@@ -168,8 +181,7 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
     uiPhaseRef.current = 'listening'
     setUiPhase('listening')
     setStatusMessage(message)
-    hasSpeechInCurrentTurnRef.current = false
-    lastSpeechAtRef.current = Date.now()
+    resetTurnDetection()
   }
 
   const setThinking = (message: string) => {
@@ -206,7 +218,9 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
     }
 
     analysisDataRef.current = null
+    turnDetectorRef.current = null
     setAudioLevel(0)
+    setIsSpeaking(false)
   }
 
   const cleanupAgentAudioAnalysis = () => {
@@ -350,7 +364,7 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
     pendingWakeListeningRef.current = false
     pendingFollowUpListeningRef.current = false
     pendingPowerOnListenRef.current = false
-    clearRuntimeTimers()
+    resetTurnDetection()
     audioQueueRef.current = []
     streamBuffersRef.current.forEach((streamBuffer) => {
       streamBuffer.ended = true
@@ -454,37 +468,52 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
       resetAssistantTurnContent()
     }
     pendingStopPurposeRef.current = null
-    lastSpeechAtRef.current = Date.now()
-    hasSpeechInCurrentTurnRef.current = false
 
-    recorder.ondataavailable = async (event: BlobEvent) => {
+    // Chunk delivery is chained through this promise so the stop message can
+    // wait its turn. Two subtleties, both of which lose the END of the user's
+    // last word if ignored:
+    //  - ondataavailable has to await the Blob before it can send, so a stop
+    //    message sent synchronously from onstop OVERTAKES the recorder's
+    //    final flush — the backend transcribes a buffer missing the tail.
+    //  - the old "is capture still on?" guard here dropped that same final
+    //    flush outright, because stopCapture clears the flag before the
+    //    recorder emits it. The backend already ignores chunks outside a
+    //    recording, so no client-side gate is needed at all.
+    let lastChunkDelivery: Promise<void> = Promise.resolve()
+
+    recorder.ondataavailable = (event: BlobEvent) => {
       if (!event.data || event.data.size === 0) {
         return
       }
 
-      if (!captureStartedRef.current) {
-        return
-      }
-
-      const wsCurrent = wsRef.current
-      if (!wsCurrent || wsCurrent.readyState !== WebSocket.OPEN) {
-        return
-      }
-
-      const data = await event.data.arrayBuffer()
-      wsCurrent.send(data)
+      const delivery = (async () => {
+        const wsCurrent = wsRef.current
+        if (!wsCurrent || wsCurrent.readyState !== WebSocket.OPEN) {
+          return
+        }
+        const data = await event.data.arrayBuffer()
+        if (wsCurrent.readyState === WebSocket.OPEN) {
+          wsCurrent.send(data)
+        }
+      })()
+      lastChunkDelivery = delivery.catch(() => {
+        // A failed chunk send must not also swallow the stop message.
+      })
     }
 
     recorder.onstop = () => {
       const stopPurpose = pendingStopPurposeRef.current
       pendingStopPurposeRef.current = null
-      if (stopPurpose) {
+      if (!stopPurpose) {
+        return
+      }
+      void lastChunkDelivery.then(() => {
         sendSocketEvent({
           event: 'stop',
           purpose: stopPurpose,
           ...(conversationIdRef.current ? { conversationId: conversationIdRef.current } : {}),
         })
-      }
+      })
     }
 
     recorder.start(450)
@@ -512,6 +541,26 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
       purpose,
       ...(conversationIdRef.current ? { conversationId: conversationIdRef.current } : {}),
     })
+  }
+
+  // Capture opened on what turned out to be a click, not speech: tear it down
+  // without transcribing anything. `pendingStopPurposeRef` stays null so the
+  // recorder's onstop sends nothing; the explicit abort tells the backend to
+  // drop the buffered noise instead of merging it into the next real turn.
+  const abortCapture = () => {
+    if (!captureStartedRef.current || capturePurposeRef.current !== 'turn') {
+      return
+    }
+
+    captureStartedRef.current = false
+    capturePurposeRef.current = 'none'
+    pendingStopPurposeRef.current = null
+
+    const recorder = mediaRecorderRef.current
+    if (recorder && recorder.state !== 'inactive') {
+      recorder.stop()
+    }
+    sendSocketEvent({ event: 'abort' })
   }
 
   const enqueueStreamAudio = (streamId: string) => {
@@ -895,6 +944,11 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
     if (payload.type === 'listening') {
       if (capturePurposeRef.current === 'turn') {
         setStatusMessage(payload.message)
+        // Starting window, until the first caption gives the backend's scorer
+        // something to read.
+        if (payload.endpointMs) {
+          turnDetectorRef.current?.setSilenceWindow(payload.endpointMs)
+        }
       }
       return
     }
@@ -981,6 +1035,13 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
       // Live caption of an in-progress recording; only meaningful mid-turn.
       if (capturePurposeRef.current === 'turn') {
         optionsRef.current.onPartialUserTranscript?.(payload.text)
+        // The caption also carries how long silence should now have to last
+        // before the turn is called over: short once the sentence resolves,
+        // long while it trails off mid-thought. This is the semantic half of
+        // turn detection -- the detector only measures the silence.
+        if (payload.endpointMs) {
+          turnDetectorRef.current?.setSilenceWindow(payload.endpointMs)
+        }
       }
       return
     }
@@ -1087,7 +1148,18 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
     sourceNodeRef.current = source
     analysisDataRef.current = new Uint8Array<ArrayBuffer>(new ArrayBuffer(analyser.fftSize))
 
+    turnDetectorRef.current = createTurnDetector({
+      onSpeechOnset: () => turnHandlersRef.current?.onSpeechOnset(),
+      onSpeechStart: () => turnHandlersRef.current?.onSpeechStart(),
+      onSpeechPause: () => turnHandlersRef.current?.onSpeechPause(),
+      onSpeechResume: () => turnHandlersRef.current?.onSpeechResume(),
+      onSpeechAbort: () => turnHandlersRef.current?.onSpeechAbort(),
+      onTurnEnd: () => turnHandlersRef.current?.onTurnEnd(),
+      onSpeakingChange: setIsSpeaking,
+    })
+
     let smoothed = 0
+    let lastPublishedAt = 0
 
     const tick = () => {
       const activeAnalyser = analyserRef.current
@@ -1108,7 +1180,20 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
       const rms = Math.sqrt(sumSquares / activeData.length)
       const amplified = Math.min(1, rms * 2.8)
       smoothed += (amplified - smoothed) * 0.18
-      setAudioLevel(smoothed)
+
+      const now = performance.now()
+
+      // The turn decision sees every frame, because a 16ms delay in noticing
+      // the end of a sentence is 16ms of latency.
+      turnDetectorRef.current?.push(smoothed, now)
+
+      // React does not: the aura is a visual, and re-rendering the runtime at
+      // 60Hz while someone talks was pure overhead. ~20Hz is past the point
+      // where the eye can tell.
+      if (now - lastPublishedAt >= 50) {
+        lastPublishedAt = now
+        setAudioLevel(smoothed)
+      }
 
       analysisFrameRef.current = requestAnimationFrame(tick)
     }
@@ -1288,36 +1373,76 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
     }
   }, [suspended]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => {
-    const speakingNow = audioLevel > speechThreshold
-
-    if (uiPhase === 'idle') {
-      return
-    }
-
-    if (uiPhase !== 'listening') {
-      return
-    }
-
-    if (speakingNow) {
-      lastSpeechAtRef.current = Date.now()
+  // What the detector does when it sees a transition. Kept in a ref because
+  // the detector is created once, inside the analyser graph, and would
+  // otherwise close over the first render's copies of these functions. Every
+  // handler is guarded on the phase: the detector keeps running whenever the
+  // microphone is open, but only a listening runtime should act on it.
+  turnHandlersRef.current = {
+    onSpeechOnset: () => {
+      if (uiPhaseRef.current !== 'listening') {
+        return
+      }
+      // Start the recorder at the first sign of speech rather than after the
+      // onset hold confirms it — confirmation costs 120ms, and a recorder
+      // started then has already missed the first syllable. If the onset
+      // turns out to be a click, onSpeechAbort unwinds this.
       if (!captureStartedRef.current) {
         startCapture('turn')
       }
-      hasSpeechInCurrentTurnRef.current = true
-      return
-    }
-
-    if (
-      captureStartedRef.current &&
-      capturePurposeRef.current === 'turn' &&
-      hasSpeechInCurrentTurnRef.current &&
-      Date.now() - lastSpeechAtRef.current > silenceTimeoutMs
-    ) {
+    },
+    onSpeechStart: () => {
+      if (uiPhaseRef.current !== 'listening') {
+        return
+      }
+      // Capture normally began at onset; this is the backstop for the edge
+      // where onset fired outside 'listening' and the phase changed since.
+      if (!captureStartedRef.current) {
+        startCapture('turn')
+      }
+    },
+    onSpeechAbort: () => {
+      abortCapture()
+    },
+    onSpeechPause: () => {
+      if (uiPhaseRef.current !== 'listening') {
+        return
+      }
+      if (captureStartedRef.current && capturePurposeRef.current === 'turn') {
+        // Flush the recorder first: the audio holding the last words is
+        // still in its internal buffer, and the backend is about to
+        // transcribe. The flushed chunk is what tells it the buffer is
+        // complete through the pause.
+        try {
+          mediaRecorderRef.current?.requestData()
+        } catch {
+          // Some recorders (Safari mp4) can throw here; the next cadence
+          // flush covers the tail, just later.
+        }
+        // The backend starts transcribing on this, so the work happens during
+        // the silence window instead of after it.
+        sendSocketEvent({ event: 'speech_pause' })
+      }
+    },
+    onSpeechResume: () => {
+      if (uiPhaseRef.current !== 'listening') {
+        return
+      }
+      if (captureStartedRef.current && capturePurposeRef.current === 'turn') {
+        sendSocketEvent({ event: 'speech_resume' })
+      }
+    },
+    onTurnEnd: () => {
+      if (uiPhaseRef.current !== 'listening') {
+        return
+      }
+      if (!captureStartedRef.current || capturePurposeRef.current !== 'turn') {
+        return
+      }
       stopCapture('turn')
       setThinking('Transcribing and generating response...')
-    }
-  }, [audioLevel, uiPhase]) // eslint-disable-line react-hooks/exhaustive-deps
+    },
+  }
 
   useEffect(() => {
     let cancelled = false
