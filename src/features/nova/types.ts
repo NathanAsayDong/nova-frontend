@@ -38,12 +38,31 @@ export type SocketEvent =
   | { type: 'wake_not_detected'; message: string }
   | { type: 'follow_up_stopped'; message: string }
   | { type: 'no_speech'; message: string }
+  // A sentence of the WRITTEN answer, for the screen only. Never spoken --
+  // see `speech_text`, which is the other half of the same turn.
   | {
       type: 'assistant_text'
       text: string
       seq: number
       conversationId: string
       markdownDisplay?: string
+    }
+  // The one thing Nova is actually saying out loud, at most a couple of
+  // sentences. Arrives just before the audio stream that carries it, and is
+  // the only way the UI can know what the opaque audio chunks contain.
+  // `role` distinguishes the pre-tool acknowledgment from the reply itself.
+  //
+  // Expect it BEFORE the written answer, often well before: the backend reads
+  // the reply as the model writes it and sends this the moment the spoken
+  // line is finished, while the markdown underneath is still being generated.
+  // So a turn normally arrives as speech_text -> audio -> assistant_text, and
+  // the transcript filling in after Nova has started talking is correct, not
+  // a dropped event.
+  | {
+      type: 'speech_text'
+      text: string
+      role: 'status' | 'final'
+      conversationId: string
     }
   | {
       type: 'done'
@@ -69,8 +88,9 @@ export type SocketEvent =
     }
   | { type: 'user_transcript'; text: string; conversationId: string }
   | { type: 'text_final'; text: string; format?: string; conversationId: string }
-  // Pre-tool acknowledgment: spoken via the TTS stream and shown as a
-  // lightweight status line in the transcript.
+  // Pre-tool acknowledgment, shown as a lightweight status line in the
+  // transcript. Its spoken form arrives separately as a `speech_text` with
+  // role 'status', clamped shorter than what is displayed here.
   | { type: 'status_text'; text: string; conversationId: string }
   | {
       type: 'tool_call'

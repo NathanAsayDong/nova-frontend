@@ -31,6 +31,11 @@ type UseNovaRuntimeResult = {
   visualAudioLevel: number
   combinedVoiceLevel: number
   hasSpeechInput: boolean
+  /**
+   * What Nova is SAYING this turn -- the short spoken line, not the
+   * written answer. The full markdown reply reaches the transcript
+   * through `onAgentEvent`; this is the caption for the audio.
+   */
   assistantText: string
   retryRuntime: () => void
   setNovaPower: (enabled: boolean) => void
@@ -45,7 +50,12 @@ type NovaRuntimeOptions = {
    * caption should be discarded (no final transcript is coming).
    */
   onPartialUserTranscript?: (text: string) => void
-  /** Structured turn events (delta / text_final / tool_call / artifact). */
+  /**
+   * Structured turn events (delta / text_final / status_text / tool_call /
+   * artifact) -- everything that belongs on screen. The spoken line is
+   * deliberately NOT among them: it is a summary of the same answer, and
+   * printing it above the answer would say everything twice.
+   */
   onAgentEvent?: (event: ChatStreamEvent) => void
   /** Turn finished; carries the conversation it belongs to. */
   onTurnComplete?: (conversationId: string) => void
@@ -134,8 +144,6 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
   const bootupCueAudioRef = useRef<HTMLAudioElement | null>(null)
   const idleCueAudioRef = useRef<HTMLAudioElement | null>(null)
   const conversationIdRef = useRef<string | null>(loadConversationId())
-  const nextTextSeqRef = useRef(1)
-  const pendingTextChunksRef = useRef(new Map<number, string>())
 
   const wsUrls = useMemo(() => resolveWsUrls(), [])
 
@@ -388,37 +396,18 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
 
   const resetAssistantTurnContent = () => {
     setAssistantText('')
-    nextTextSeqRef.current = 1
-    pendingTextChunksRef.current.clear()
   }
 
-  const appendOrderedChunk = (
-    pending: Map<number, string>,
-    nextSeqRef: { current: number },
-    seq: number,
-    value: string,
-    onAppend: (chunk: string) => void,
-  ) => {
-    pending.set(seq, value)
-    let assembled = ''
-    while (pending.has(nextSeqRef.current)) {
-      assembled += pending.get(nextSeqRef.current)!
-      pending.delete(nextSeqRef.current)
-      nextSeqRef.current += 1
-    }
-    if (assembled) {
-      onAppend(assembled)
-    }
-  }
-
-  const appendAssistantTextChunk = (seq: number, text: string) => {
-    appendOrderedChunk(
-      pendingTextChunksRef.current,
-      nextTextSeqRef,
-      seq,
-      text,
-      (chunk) => setAssistantText((current) => current + chunk),
-    )
+  /**
+   * Accumulate what Nova says out loud over one turn.
+   *
+   * A turn speaks at most twice -- the pre-tool acknowledgment, then the
+   * reply -- and both arrive in order down the one socket, so this needs no
+   * sequencing. The written answer used to feed this state and did need it,
+   * back when the two were the same text.
+   */
+  const appendSpokenLine = (text: string) => {
+    setAssistantText((current) => (current ? `${current} ${text}` : text))
   }
 
   const sendSocketEvent = (payload: Record<string, unknown>): boolean => {
@@ -1085,13 +1074,27 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
         return
       }
       persistConversationId(payload.conversationId)
+      // Screen only. This is the full written answer, which is now allowed to
+      // be as long as the question deserves precisely because nobody has to
+      // listen to it.
       optionsRef.current.onAgentEvent?.({
         type: 'delta',
         text: payload.text,
         seq: payload.seq,
         format: 'markdown',
       })
-      appendAssistantTextChunk(payload.seq, payload.text)
+      return
+    }
+
+    if (payload.type === 'speech_text') {
+      // The spoken half of the turn. Its audio follows immediately as the
+      // usual TTS stream events; this is the text of that audio, kept out of
+      // the transcript because the written answer already says it at length.
+      if (suppressAssistantAudioUntilNextTurnRef.current) {
+        return
+      }
+      persistConversationId(payload.conversationId)
+      appendSpokenLine(payload.text)
       return
     }
 
@@ -1101,7 +1104,9 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
       }
       persistConversationId(payload.conversationId)
       optionsRef.current.onTurnComplete?.(payload.conversationId)
-      setAssistantText(payload.assistantText)
+      // Deliberately not setAssistantText: `assistantText` on the done event
+      // is the written answer, and this state tracks what was spoken. The
+      // speech_text events already filled it in.
       pendingFollowUpListeningRef.current = true
       setStatusMessage(payload.message)
       if (!isAudioQueueRunningRef.current && audioQueueRef.current.length === 0) {
