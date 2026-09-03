@@ -51,6 +51,13 @@ export type SocketEvent =
   // sentences. Arrives just before the audio stream that carries it, and is
   // the only way the UI can know what the opaque audio chunks contain.
   // `role` distinguishes the pre-tool acknowledgment from the reply itself.
+  //
+  // Expect it BEFORE the written answer, often well before: the backend reads
+  // the reply as the model writes it and sends this the moment the spoken
+  // line is finished, while the markdown underneath is still being generated.
+  // So a turn normally arrives as speech_text -> audio -> assistant_text, and
+  // the transcript filling in after Nova has started talking is correct, not
+  // a dropped event.
   | {
       type: 'speech_text'
       text: string
