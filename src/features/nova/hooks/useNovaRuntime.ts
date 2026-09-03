@@ -84,7 +84,7 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
   const audioContextRef = useRef<AudioContext | null>(null)
   const analyserRef = useRef<AnalyserNode | null>(null)
   const sourceNodeRef = useRef<MediaStreamAudioSourceNode | null>(null)
-  const analysisFrameRef = useRef<number | null>(null)
+  const analysisTimerRef = useRef<number | null>(null)
   const analysisDataRef = useRef<Uint8Array<ArrayBuffer> | null>(null)
   const agentAudioContextRef = useRef<AudioContext | null>(null)
   const agentMeterNodeRef = useRef<AudioWorkletNode | null>(null)
@@ -108,10 +108,10 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
   const captureStartedRef = useRef(false)
   const pendingStopPurposeRef = useRef<Exclude<CapturePurpose, 'none'> | null>(null)
 
-  // Turn detection. The detector runs inside the analyser's animation frame
-  // and calls back on transitions only, so it never re-renders this hook while
-  // the user is mid-sentence. Its handlers are reached through a ref because
-  // the detector outlives the render that created it.
+  // Turn detection. The detector is fed by the analysis timer and calls back
+  // on transitions only, so it never re-renders this hook while the user is
+  // mid-sentence. Its handlers are reached through a ref because the detector
+  // outlives the render that created it.
   const turnDetectorRef = useRef<TurnDetector | null>(null)
   const turnHandlersRef = useRef<{
     onSpeechOnset: () => void
@@ -197,9 +197,9 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
   }
 
   const cleanupAudioAnalysis = () => {
-    if (analysisFrameRef.current !== null) {
-      cancelAnimationFrame(analysisFrameRef.current)
-      analysisFrameRef.current = null
+    if (analysisTimerRef.current !== null) {
+      window.clearInterval(analysisTimerRef.current)
+      analysisTimerRef.current = null
     }
 
     if (sourceNodeRef.current) {
@@ -1160,7 +1160,17 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
 
     let smoothed = 0
     let lastPublishedAt = 0
+    let lastTickAt = performance.now()
 
+    // A timer, deliberately NOT requestAnimationFrame. rAF stops completely
+    // while the tab or window is hidden — and the user watches the face page
+    // or the server logs while talking, so a rAF-driven detector froze
+    // mid-turn and the recorder ran until they clicked back. rAF also runs at
+    // whatever the monitor refreshes at (60Hz laptop, 144Hz gaming tower),
+    // which made every per-frame constant machine-dependent. A 25ms interval
+    // is steady on a visible tab and degrades to ~1s ticks on a hidden one —
+    // coarse, but the turn still ends. All smoothing is dt-aware so the
+    // cadence change alters resolution, not behavior.
     const tick = () => {
       const activeAnalyser = analyserRef.current
       const activeData = analysisDataRef.current
@@ -1179,26 +1189,25 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
 
       const rms = Math.sqrt(sumSquares / activeData.length)
       const amplified = Math.min(1, rms * 2.8)
-      smoothed += (amplified - smoothed) * 0.18
 
       const now = performance.now()
+      const dt = Math.max(1, now - lastTickAt)
+      lastTickAt = now
+      // ~90ms time constant, matching the old 0.18-per-frame feel at 60Hz.
+      smoothed += (amplified - smoothed) * (1 - Math.exp(-dt / 90))
 
-      // The turn decision sees every frame, because a 16ms delay in noticing
-      // the end of a sentence is 16ms of latency.
       turnDetectorRef.current?.push(smoothed, now)
 
-      // React does not: the aura is a visual, and re-rendering the runtime at
-      // 60Hz while someone talks was pure overhead. ~20Hz is past the point
-      // where the eye can tell.
+      // React sees far fewer updates than the detector: the aura is a
+      // visual, and re-rendering the runtime at tick rate while someone
+      // talks was pure overhead. ~20Hz is past the point the eye can tell.
       if (now - lastPublishedAt >= 50) {
         lastPublishedAt = now
         setAudioLevel(smoothed)
       }
-
-      analysisFrameRef.current = requestAnimationFrame(tick)
     }
 
-    analysisFrameRef.current = requestAnimationFrame(tick)
+    analysisTimerRef.current = window.setInterval(tick, 25)
   }
 
   const initializeRuntime = async () => {
