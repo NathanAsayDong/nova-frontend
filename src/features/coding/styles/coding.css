@@ -390,3 +390,55 @@
     max-height: 150px;
   }
 }
+
+/* Existing Claude Code threads on the Mac — not sessions Nova started. */
+.codingThreads {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--paper);
+  box-shadow: var(--shadow-soft);
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.codingThreadsHint {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.codingThreadList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.codingThreadList li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 11px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--paper-soft);
+}
+
+.codingThreadInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.codingThreadList .codingButton {
+  padding: 6px 12px;
+  font-size: 0.78rem;
+}

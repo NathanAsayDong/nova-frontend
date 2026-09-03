@@ -52,3 +52,24 @@ export type CodingSessionDetail = {
   events: CodingEvent[]
   agentConnected: boolean
 }
+
+/**
+ * A Claude Code conversation that already exists on the Mac.
+ *
+ * These are not Nova's — most were started by Nate in the desktop app. They
+ * come from Claude Code's own on-disk store, which every surface shares, so
+ * a thread he has been running for a week is listed here alongside anything
+ * Nova started.
+ */
+export type ClaudeThread = {
+  session_id: string
+  title: string | null
+  first_prompt: string | null
+  git_branch: string | null
+  cwd: string | null
+  last_modified: string | null
+  created_at: string | null
+  size_bytes: number | null
+  /** Whether the Mac agent is already holding this thread open. */
+  attached: boolean
+}

@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
+  adoptClaudeThread,
+  fetchClaudeThreads,
   fetchCodingSession,
   fetchCodingSessions,
   sendCodingFeedback,
   startCodingSession,
   stopCodingSession,
 } from '../api'
-import type { CodingEvent, CodingSession, CodingStatus } from '../types'
+import type { ClaudeThread, CodingEvent, CodingSession, CodingStatus } from '../types'
 
 type CodingPanelProps = {
   onClose: () => void
@@ -30,6 +32,19 @@ const STATUS_LABEL: Record<CodingStatus, string> = {
   idle: 'Idle',
   error: 'Error',
   closed: 'Closed',
+}
+
+function formatWhen(value: string): string {
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) {
+    return value
+  }
+  return parsed.toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  })
 }
 
 const STATUS_CLASS: Record<CodingStatus, string> = {
@@ -113,6 +128,8 @@ export function CodingPanel({ onClose }: CodingPanelProps) {
   const [isSending, setIsSending] = useState(false)
   const [showStart, setShowStart] = useState(false)
   const [draft, setDraft] = useState({ repo: 'nova-backend', title: '', instructions: '' })
+  const [threads, setThreads] = useState<ClaudeThread[] | null>(null)
+  const [isLoadingThreads, setIsLoadingThreads] = useState(false)
 
   // Tracks how far the event list has been filled so each poll can ask only
   // for what is new. A ref, not state: changing it must not re-trigger the
@@ -201,6 +218,40 @@ export function CodingPanel({ onClose }: CodingPanelProps) {
     }
   }
 
+  /**
+   * Threads Claude Code already has for this repo, Nova's or not.
+   *
+   * Loaded on demand rather than with the panel: it reads the Mac's disk
+   * through the websocket, which is pointless to do for someone who only
+   * wanted to glance at a running task.
+   */
+  const loadThreads = async () => {
+    const repo = draft.repo.trim()
+    if (!repo) {
+      return
+    }
+    setIsLoadingThreads(true)
+    try {
+      const body = await fetchClaudeThreads(repo)
+      setThreads(body.sessions)
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : 'Could not read the Mac\'s threads.')
+    } finally {
+      setIsLoadingThreads(false)
+    }
+  }
+
+  const adopt = async (thread: ClaudeThread) => {
+    try {
+      const picked = await adoptClaudeThread(draft.repo.trim(), thread.session_id)
+      await loadSessions()
+      setSelectedId(picked.sessionId)
+      setThreads(null)
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : 'Could not pick up that thread.')
+    }
+  }
+
   const submitStart = async () => {
     if (!draft.repo.trim() || !draft.instructions.trim()) {
       return
@@ -233,6 +284,15 @@ export function CodingPanel({ onClose }: CodingPanelProps) {
           <button type="button" className="codingButton" onClick={() => setShowStart((v) => !v)} disabled={!agentConnected}>
             New task
           </button>
+          <button
+            type="button"
+            className="codingButton"
+            onClick={() => (threads === null ? void loadThreads() : setThreads(null))}
+            disabled={!agentConnected || isLoadingThreads}
+            title="Conversations Claude Code already has for this repo, including ones from the desktop app"
+          >
+            {isLoadingThreads ? 'Reading…' : threads === null ? 'Existing threads' : 'Hide threads'}
+          </button>
           <button type="button" className="codingButton" onClick={onClose}>
             Close
           </button>
@@ -262,6 +322,42 @@ export function CodingPanel({ onClose }: CodingPanelProps) {
           <button type="button" className="codingButton" onClick={() => void submitStart()}>
             Start
           </button>
+        </div>
+      ) : null}
+
+      {threads !== null ? (
+        <div className="codingThreads">
+          <p className="codingThreadsHint">
+            Claude Code threads for <strong>{draft.repo}</strong> on your Mac. Picking
+            one up resumes that conversation with its context, in the real working tree.
+          </p>
+          {threads.length === 0 ? (
+            <p className="codingEmpty">No Claude Code history for that repo.</p>
+          ) : null}
+          <ul className="codingThreadList">
+            {threads.map((thread) => (
+              <li key={thread.session_id}>
+                <div className="codingThreadInfo">
+                  <span className="codingListItemTitle">
+                    {thread.title ?? thread.first_prompt ?? thread.session_id}
+                  </span>
+                  <span className="codingListItemMeta">
+                    {thread.git_branch ?? 'no branch'}
+                    {thread.last_modified ? ` · ${formatWhen(thread.last_modified)}` : ''}
+                    {thread.attached ? ' · already open' : ''}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  className="codingButton"
+                  onClick={() => void adopt(thread)}
+                  disabled={!agentConnected}
+                >
+                  {thread.attached ? 'Open' : 'Pick up'}
+                </button>
+              </li>
+            ))}
+          </ul>
         </div>
       ) : null}
 

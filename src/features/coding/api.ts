@@ -1,4 +1,4 @@
-import type { CodingSession, CodingSessionDetail } from './types'
+import type { ClaudeThread, CodingSession, CodingSessionDetail } from './types'
 
 async function readJson<T>(response: Response): Promise<T> {
   if (!response.ok) {
@@ -69,4 +69,34 @@ export async function sendCodingFeedback(
 
 export async function stopCodingSession(sessionId: string): Promise<{ status: string }> {
   return readJson(await fetch(`/coding/sessions/${sessionId}/stop`, { method: 'POST' }))
+}
+
+/** Claude Code threads already on the Mac for this repo, newest first. */
+export async function fetchClaudeThreads(
+  repo: string,
+): Promise<{ repo: string; sessions: ClaudeThread[] }> {
+  return readJson(await fetch(`/coding/repos/${encodeURIComponent(repo)}/threads`))
+}
+
+/**
+ * Pick up an existing thread so Nova can carry it on.
+ *
+ * The agent resumes that conversation with all of its context rather than
+ * starting cold, and it becomes a normal session in the list above.
+ */
+export async function adoptClaudeThread(
+  repo: string,
+  sessionId: string,
+  instructions?: string,
+): Promise<{ sessionId: string; status: string }> {
+  return readJson(
+    await fetch(
+      `/coding/repos/${encodeURIComponent(repo)}/threads/${sessionId}/adopt`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ instructions }),
+      },
+    ),
+  )
 }
