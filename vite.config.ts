@@ -82,6 +82,9 @@ export default defineConfig(({ mode }) => {
         '/meetings': {
           target: apiUrl,
         },
+        '/coding': {
+          target: apiUrl,
+        },
       },
     },
   }
