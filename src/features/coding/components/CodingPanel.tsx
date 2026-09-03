@@ -32,6 +32,15 @@ const STATUS_LABEL: Record<CodingStatus, string> = {
   closed: 'Closed',
 }
 
+const STATUS_CLASS: Record<CodingStatus, string> = {
+  starting: 'codingStatusWorking',
+  queued: 'codingStatusQueued',
+  working: 'codingStatusWorking',
+  idle: 'codingStatusIdle',
+  error: 'codingStatusError',
+  closed: 'codingStatusClosed',
+}
+
 function isLive(status: CodingStatus): boolean {
   return status === 'working' || status === 'starting'
 }
@@ -40,17 +49,17 @@ function EventRow({ event }: { event: CodingEvent }) {
   const { type, payload } = event
 
   if (type === 'text') {
-    return <p className="coding-event coding-event--text">{payload.text}</p>
+    return <p className="codingEvent">{payload.text}</p>
   }
   if (type === 'tool') {
     const artifact = payload.artifact
     return (
-      <div className="coding-event coding-event--tool">
-        <span className="coding-tool-name">{payload.tool}</span>
+      <div className="codingEvent codingEventTool">
+        <span className="codingToolName">{payload.tool}</span>
         {artifact ? (
-          <details className="coding-artifact">
+          <details className="codingArtifact">
             <summary>
-              <span className={`coding-artifact-kind coding-artifact-kind--${artifact.kind}`}>
+              <span className={`codingArtifactKind${artifact.kind === 'diff' ? ' codingArtifactKindDiff' : ''}`}>
                 {artifact.kind}
               </span>
               {artifact.title}
@@ -63,10 +72,10 @@ function EventRow({ event }: { event: CodingEvent }) {
   }
   if (type === 'result') {
     return (
-      <div className={`coding-event coding-event--result${payload.is_error ? ' is-error' : ''}`}>
+      <div className={`codingEventResult${payload.is_error ? ' isError' : ''}`}>
         <strong>{payload.is_error ? 'Failed' : 'Done'}</strong>
         {payload.result ? <p>{payload.result}</p> : null}
-        {payload.num_turns ? <span className="coding-meta">{payload.num_turns} turns</span> : null}
+        {payload.num_turns ? <span className="codingResultMeta">{payload.num_turns} turns</span> : null}
       </div>
     )
   }
@@ -75,11 +84,11 @@ function EventRow({ event }: { event: CodingEvent }) {
       .filter(([, v]) => v != null)
       .map(([k, v]) => `${k.replace('_', ' ')} ${Math.round((v as number) * 100)}%`)
       .join(' · ')
-    return <p className="coding-event coding-event--meta">Usage window: {used || 'ok'}</p>
+    return <p className="codingEvent codingEventMeta">Usage window: {used || 'ok'}</p>
   }
   if (type === 'error') {
     return (
-      <p className="coding-event coding-event--error">
+      <p className="codingEvent codingEventError">
         {payload.reason === 'rate_limit'
           ? 'Paused — the Claude usage window is used up.'
           : payload.detail}
@@ -87,7 +96,7 @@ function EventRow({ event }: { event: CodingEvent }) {
     )
   }
   if (type === 'started') {
-    return <p className="coding-event coding-event--meta">Branch {payload.branch}</p>
+    return <p className="codingEvent codingEventMeta">Branch {payload.branch}</p>
   }
   return null
 }
@@ -212,28 +221,28 @@ export function CodingPanel({ onClose }: CodingPanelProps) {
   }
 
   return (
-    <section className="coding-panel">
-      <header className="coding-panel__header">
-        <div>
-          <h2>Coding</h2>
-          <span className={`coding-agent-dot${agentConnected ? ' is-online' : ''}`}>
+    <section className="codingPanel">
+      <header className="codingPanelHeader">
+        <div className="codingPanelHeading">
+          <h2 className="codingPanelTitle">Coding</h2>
+          <span className={`codingAgentPill${agentConnected ? ' isOnline' : ''}`}>
             {agentConnected ? 'Mac connected' : 'Mac offline'}
           </span>
         </div>
-        <div className="coding-panel__actions">
-          <button type="button" onClick={() => setShowStart((v) => !v)} disabled={!agentConnected}>
+        <div className="codingPanelActions">
+          <button type="button" className="codingButton" onClick={() => setShowStart((v) => !v)} disabled={!agentConnected}>
             New task
           </button>
-          <button type="button" onClick={onClose}>
+          <button type="button" className="codingButton" onClick={onClose}>
             Close
           </button>
         </div>
       </header>
 
-      {error ? <p className="coding-error">{error}</p> : null}
+      {error ? <p className="codingError">{error}</p> : null}
 
       {showStart ? (
-        <div className="coding-start">
+        <div className="codingStartForm">
           <input
             value={draft.repo}
             onChange={(e) => setDraft({ ...draft, repo: e.target.value })}
@@ -250,52 +259,52 @@ export function CodingPanel({ onClose }: CodingPanelProps) {
             placeholder="What should it build? Brief it like an engineer who can't ask a follow-up."
             rows={4}
           />
-          <button type="button" onClick={() => void submitStart()}>
+          <button type="button" className="codingButton" onClick={() => void submitStart()}>
             Start
           </button>
         </div>
       ) : null}
 
-      <div className="coding-panel__body">
-        <ul className="coding-list">
-          {sessions.length === 0 ? <li className="coding-empty">No coding tasks yet.</li> : null}
+      <div className="codingBody">
+        <ul className="codingList">
+          {sessions.length === 0 ? <li className="codingEmpty">No coding tasks yet.</li> : null}
           {sessions.map((session) => (
             <li key={session.sessionId}>
               <button
                 type="button"
-                className={session.sessionId === selectedId ? 'is-selected' : ''}
+                className={`codingListItem${session.sessionId === selectedId ? ' isSelected' : ''}`}
                 onClick={() => setSelectedId(session.sessionId)}
               >
-                <span className={`coding-status coding-status--${session.status}`}>
+                <span className={`codingStatus ${STATUS_CLASS[session.status] ?? ''}`}>
                   {STATUS_LABEL[session.status] ?? session.status}
                 </span>
-                <strong>{session.title}</strong>
-                <small>{session.branch ?? session.repo}</small>
+                <span className="codingListItemTitle">{session.title}</span>
+                <span className="codingListItemMeta">{session.branch ?? session.repo}</span>
               </button>
             </li>
           ))}
         </ul>
 
-        <div className="coding-detail">
+        <div className="codingDetail">
           {detail ? (
             <>
-              <div className="coding-detail__head">
-                <h3>{detail.title}</h3>
-                <p className="coding-rollup">{detail.rollup}</p>
-                <small>
+              <div className="codingDetailHead">
+                <h3 className="codingDetailTitle">{detail.title}</h3>
+                <p className="codingRollup">{detail.rollup}</p>
+                <span className="codingDetailMeta">
                   {detail.repo}
                   {detail.branch ? ` · ${detail.branch}` : ''}
-                </small>
+                </span>
               </div>
 
-              <div className="coding-stream">
+              <div className="codingStream">
                 {events.map((event) => (
                   <EventRow key={event.seq} event={event} />
                 ))}
                 <div ref={tailRef} />
               </div>
 
-              <div className="coding-feedback">
+              <div className="codingFeedback">
                 <textarea
                   value={feedback}
                   onChange={(e) => setFeedback(e.target.value)}
@@ -303,9 +312,10 @@ export function CodingPanel({ onClose }: CodingPanelProps) {
                   rows={2}
                   disabled={!agentConnected || detail.status === 'closed'}
                 />
-                <div className="coding-feedback__actions">
+                <div className="codingFeedbackActions">
                   <button
                     type="button"
+                    className="codingButton"
                     onClick={() => void submitFeedback(false)}
                     disabled={isSending || !feedback.trim() || !agentConnected}
                   >
@@ -313,6 +323,7 @@ export function CodingPanel({ onClose }: CodingPanelProps) {
                   </button>
                   <button
                     type="button"
+                    className="codingButton"
                     title="Interrupt what it's doing and apply this now"
                     onClick={() => void submitFeedback(true)}
                     disabled={isSending || !feedback.trim() || !agentConnected}
@@ -321,7 +332,7 @@ export function CodingPanel({ onClose }: CodingPanelProps) {
                   </button>
                   <button
                     type="button"
-                    className="coding-stop"
+                    className="codingButton codingButtonDanger"
                     onClick={() => void stopCodingSession(detail.sessionId).then(loadSessions)}
                     disabled={detail.status === 'closed'}
                   >
@@ -331,7 +342,7 @@ export function CodingPanel({ onClose }: CodingPanelProps) {
               </div>
             </>
           ) : (
-            <p className="coding-empty">Pick a task to watch it work.</p>
+            <p className="codingEmpty">Pick a task to watch it work.</p>
           )}
         </div>
       </div>
