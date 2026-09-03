@@ -21,10 +21,12 @@ type ConversationHeaderProps = {
   /** Blocks the toggle while a meeting is starting or being written up. */
   isMeetingBusy: boolean
   isMeetingsPanelOpen: boolean
+  isCodingPanelOpen: boolean
   onNewConversation: () => void
   onTogglePower: () => void
   onToggleMeeting: () => void
   onToggleMeetingsPanel: () => void
+  onToggleCodingPanel: () => void
 }
 
 const PHASE_LABEL: Record<UiPhase, string> = {
@@ -44,10 +46,12 @@ export function ConversationHeader({
   isMeetingMode,
   isMeetingBusy,
   isMeetingsPanelOpen,
+  isCodingPanelOpen,
   onNewConversation,
   onTogglePower,
   onToggleMeeting,
   onToggleMeetingsPanel,
+  onToggleCodingPanel,
 }: ConversationHeaderProps) {
   const [showProjects, setShowProjects] = useState(false)
 
@@ -104,6 +108,16 @@ export function ConversationHeader({
             title="Past meetings, notes, and transcripts"
           >
             Meetings
+          </button>
+
+          <button
+            type="button"
+            className={`meetingToggle ${isCodingPanelOpen ? 'open' : ''}`}
+            onClick={onToggleCodingPanel}
+            aria-pressed={isCodingPanelOpen}
+            title="Coding tasks running on the Mac"
+          >
+            Coding
           </button>
 
           <button

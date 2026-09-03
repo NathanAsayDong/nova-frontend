@@ -7,6 +7,7 @@ import { MicButton } from './features/nova/components/MicButton'
 import { MeetingView } from './features/meetings/components/MeetingView'
 import { MeetingStartForm } from './features/meetings/components/MeetingStartForm'
 import { MeetingsPanel } from './features/meetings/components/MeetingsPanel'
+import { CodingPanel } from './features/coding/components/CodingPanel'
 import { useMeetingMode } from './features/meetings/hooks/useMeetingMode'
 import { connectFacePublisher, publishFaceMode } from './features/face/publisher'
 import type { FaceMode } from './features/face/faceTypes'
@@ -97,6 +98,7 @@ function App() {
   const [projects, setProjects] = useState<ProjectSummary[]>([])
   const [isStartFormOpen, setIsStartFormOpen] = useState(false)
   const [isMeetingsPanelOpen, setIsMeetingsPanelOpen] = useState(false)
+  const [isCodingPanelOpen, setIsCodingPanelOpen] = useState(false)
 
   const loadProjects = useCallback(async () => {
     try {
@@ -163,7 +165,14 @@ function App() {
           onToggleMeeting={handleToggleMeeting}
           onToggleMeetingsPanel={() => {
             setIsStartFormOpen(false)
+            setIsCodingPanelOpen(false)
             setIsMeetingsPanelOpen((current) => !current)
+          }}
+          isCodingPanelOpen={isCodingPanelOpen}
+          onToggleCodingPanel={() => {
+            setIsStartFormOpen(false)
+            setIsMeetingsPanelOpen(false)
+            setIsCodingPanelOpen((current) => !current)
           }}
         />
 
@@ -201,6 +210,7 @@ function App() {
               // lands in the conversation rather than back where you were.
               setIsStartFormOpen(false)
               setIsMeetingsPanelOpen(false)
+              setIsCodingPanelOpen(false)
               dismissFinished()
             }}
           />
@@ -209,6 +219,8 @@ function App() {
             projects={projects}
             onClose={() => setIsMeetingsPanelOpen(false)}
           />
+        ) : isCodingPanelOpen ? (
+          <CodingPanel onClose={() => setIsCodingPanelOpen(false)} />
         ) : (
           <ConversationPanel
             messages={messages}
