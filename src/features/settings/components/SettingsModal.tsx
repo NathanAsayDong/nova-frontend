@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useSettings } from '../hooks/useSettings'
 import '../styles/settings-modal.css'
 
@@ -25,7 +26,13 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps) => {
 
   if (!isOpen) return null
 
-  return (
+  // Rendered into document.body rather than in place. The header that mounts
+  // this sets backdrop-filter, which makes it a containing block for
+  // position: fixed descendants — so the overlay sized and positioned itself
+  // against the header instead of the viewport, landing half off-screen at
+  // the header's own width. A portal is what keeps the modal's own CSS
+  // honest wherever it gets mounted.
+  return createPortal(
     <>
       <div className="settings-modal-overlay" onClick={onClose} />
       <div className="settings-modal">
@@ -84,6 +91,7 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps) => {
           </div>
         </div>
       </div>
-    </>
+    </>,
+    document.body,
   )
 }

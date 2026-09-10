@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { UiPhase } from '../types'
+import { SettingsModal } from '../../settings'
 import { McpServerPanel } from './McpServerPanel'
 
 export type ProjectSummary = {
@@ -54,6 +55,10 @@ export function ConversationHeader({
   onToggleCodingPanel,
 }: ConversationHeaderProps) {
   const [showProjects, setShowProjects] = useState(false)
+  // Owned here rather than lifted to App: the modal is a self-contained
+  // fixed overlay and nothing else needs to know it is open, the same way
+  // McpServerPanel manages itself from inside this header.
+  const [showSettings, setShowSettings] = useState(false)
 
   // Chat and speech are one conversation, so the status reflects either one.
   const phase: UiPhase = isStreaming && uiPhase === 'idle' ? 'thinking' : uiPhase
@@ -145,6 +150,28 @@ export function ConversationHeader({
           <button type="button" className="headerButton" onClick={onNewConversation}>
             New conversation
           </button>
+
+          <button
+            type="button"
+            className={`settingsToggle ${showSettings ? 'open' : ''}`}
+            onClick={() => setShowSettings(true)}
+            aria-haspopup="dialog"
+            aria-expanded={showSettings}
+            aria-label="Settings"
+            title="Model and API credits"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M4 8h9M17.4 8H20M4 16h2.6M11 16h9"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+              />
+              <circle cx="15.2" cy="8" r="2.2" fill="none" stroke="currentColor" strokeWidth="2.2" />
+              <circle cx="8.8" cy="16" r="2.2" fill="none" stroke="currentColor" strokeWidth="2.2" />
+            </svg>
+          </button>
         </div>
       </div>
 
@@ -193,6 +220,13 @@ export function ConversationHeader({
       ) : null}
 
       <McpServerPanel />
+
+      {/* Mounted only while open. useSettings fetches models and credits on
+          mount, and the credits call reaches Anthropic, so rendering the
+          modal closed would spend both on every page load. */}
+      {showSettings ? (
+        <SettingsModal isOpen onClose={() => setShowSettings(false)} />
+      ) : null}
     </header>
   )
 }

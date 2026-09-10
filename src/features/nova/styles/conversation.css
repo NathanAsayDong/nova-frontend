@@ -889,3 +889,38 @@
   background: var(--green-soft);
   border-color: var(--green);
 }
+
+/* Settings trigger. Sized to the pill buttons beside it rather than to
+   .powerToggle, which sits in the brand group at a smaller 26px. */
+.settingsToggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+  background: var(--paper);
+  color: var(--muted);
+  cursor: pointer;
+  transition: background-color 150ms ease, border-color 150ms ease,
+    color 150ms ease;
+}
+
+.settingsToggle svg {
+  width: 16px;
+  height: 16px;
+}
+
+.settingsToggle:hover {
+  color: var(--green-deep);
+  border-color: var(--green);
+  background: var(--green-soft);
+}
+
+.settingsToggle.open {
+  color: var(--green-deep);
+  border-color: var(--green);
+  background: var(--green-mist);
+}
