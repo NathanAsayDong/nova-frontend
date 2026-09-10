@@ -9,6 +9,7 @@ import type {
 } from '../chatTypes'
 import type { ProjectSummary } from '../components/ConversationHeader'
 import { loadConversationId, saveConversationId } from '../utils'
+import { authFetch } from '../../../lib/api'
 
 let messageCounter = 0
 const nextId = () => `m${++messageCounter}`
@@ -171,7 +172,7 @@ export function useNovaChat() {
       return
     }
     try {
-      const response = await fetch(`/conversations/${conversationId}`)
+      const response = await authFetch(`/conversations/${conversationId}`)
       if (!response.ok) {
         return
       }
@@ -190,7 +191,7 @@ export function useNovaChat() {
 
     setIsLoadingHistory(true)
     try {
-      const response = await fetch(`/conversations/${conversationId}/messages`)
+      const response = await authFetch(`/conversations/${conversationId}/messages`)
       if (response.status === 404) {
         // Conversation was deleted server-side; start fresh rather than error.
         conversationIdRef.current = null
@@ -271,7 +272,7 @@ export function useNovaChat() {
       abortRef.current = controller
 
       try {
-        const response = await fetch('/chat/stream', {
+        const response = await authFetch('/chat/stream', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
           body: JSON.stringify({
@@ -531,7 +532,7 @@ export function useNovaChat() {
     const previous = conversationIdRef.current
     if (previous) {
       // Closed conversations are terminal server-side; fire and forget.
-      void fetch(`/conversations/${previous}/close`, { method: 'POST' }).catch(() => {})
+      void authFetch(`/conversations/${previous}/close`, { method: 'POST' }).catch(() => {})
     }
     conversationIdRef.current = null
     saveConversationId('')

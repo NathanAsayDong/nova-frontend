@@ -1,0 +1,5 @@
+export { AuthGate } from './components/AuthGate'
+export { LoginPage } from './components/LoginPage'
+export { useAuth } from './hooks/useAuth'
+export { fetchSessions, signOut, signOutEverywhere } from './api'
+export type { SessionInfo } from './api'

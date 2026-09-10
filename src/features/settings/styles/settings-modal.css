@@ -221,3 +221,63 @@
   padding: 6px 12px;
   font-size: 0.72rem;
 }
+
+/* ---- signed-in devices ---- */
+
+.session-list {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.session-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background-color: var(--paper-soft);
+  border-left: 3px solid var(--border-strong);
+}
+
+.session-list li.current {
+  background-color: var(--green-mist);
+  border-left-color: var(--green);
+}
+
+.session-agent {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.session-meta {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.session-empty {
+  margin: 0 0 12px;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.session-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.settings-item button.danger {
+  background-color: transparent;
+  color: #9f1d1d;
+  border-color: #e3b4b4;
+}
+
+.settings-item button.danger:hover:not(:disabled) {
+  background-color: #fdecec;
+  border-color: #d97070;
+}

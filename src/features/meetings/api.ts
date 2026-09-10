@@ -1,4 +1,5 @@
 import type { Meeting, MeetingDetail } from './types'
+import { authFetch } from '../../lib/api'
 
 async function readJson<T>(response: Response): Promise<T> {
   if (!response.ok) {
@@ -17,7 +18,7 @@ async function readJson<T>(response: Response): Promise<T> {
 }
 
 export async function fetchActiveMeeting(): Promise<Meeting | null> {
-  const response = await fetch('/meetings/active')
+  const response = await authFetch('/meetings/active')
   const body = await readJson<{ meeting: Meeting | null }>(response)
   return body.meeting
 }
@@ -26,7 +27,7 @@ export async function startMeeting(input: {
   title?: string
   projectId?: number | null
 }): Promise<Meeting> {
-  const response = await fetch('/meetings', {
+  const response = await authFetch('/meetings', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -40,7 +41,7 @@ export async function startMeeting(input: {
 
 export async function stopMeeting(uuid: string): Promise<void> {
   await readJson(
-    await fetch(`/meetings/${uuid}/stop`, {
+    await authFetch(`/meetings/${uuid}/stop`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ generateNotes: true }),
@@ -49,11 +50,11 @@ export async function stopMeeting(uuid: string): Promise<void> {
 }
 
 export async function fetchMeeting(uuid: string): Promise<MeetingDetail> {
-  return readJson<MeetingDetail>(await fetch(`/meetings/${uuid}`))
+  return readJson<MeetingDetail>(await authFetch(`/meetings/${uuid}`))
 }
 
 export async function fetchMeetings(limit = 20): Promise<Meeting[]> {
-  const response = await fetch(`/meetings?limit=${limit}`)
+  const response = await authFetch(`/meetings?limit=${limit}`)
   const body = await readJson<{ meetings: Meeting[] }>(response)
   return body.meetings
 }
@@ -62,7 +63,7 @@ export async function updateMeeting(
   uuid: string,
   changes: { title?: string; projectId?: number | null; clearProject?: boolean },
 ): Promise<Meeting> {
-  const response = await fetch(`/meetings/${uuid}`, {
+  const response = await authFetch(`/meetings/${uuid}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(changes),
@@ -72,13 +73,13 @@ export async function updateMeeting(
 }
 
 export async function deleteMeeting(uuid: string): Promise<void> {
-  await readJson(await fetch(`/meetings/${uuid}`, { method: 'DELETE' }))
+  await readJson(await authFetch(`/meetings/${uuid}`, { method: 'DELETE' }))
 }
 
 export async function fetchMeetingSegments(
   uuid: string,
 ): Promise<{ startMs: number; endMs: number; text: string }[]> {
-  const response = await fetch(`/meetings/${uuid}/segments`)
+  const response = await authFetch(`/meetings/${uuid}/segments`)
   const body = await readJson<{
     segments: { startMs: number; endMs: number; text: string }[]
   }>(response)

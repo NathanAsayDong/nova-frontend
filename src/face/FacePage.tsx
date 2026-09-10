@@ -29,7 +29,7 @@ export function FacePage() {
     // `?ws=` lets a face tab bypass the same-origin default — handy when the
     // face runs on another device that reaches the backend directly.
     const override = new URLSearchParams(window.location.search).get('ws')
-    const urls = override ? [override] : resolveWsUrlsForPath('/ws/face')
+    const urls = override ? [override] : resolveWsUrlsForPath('/ws/face', { auth: false })
 
     const scheduleReconnect = () => {
       if (cancelled || reconnectTimer !== null) {

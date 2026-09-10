@@ -1,4 +1,5 @@
 import type { ClaudeThread, CodingSession, CodingSessionDetail } from './types'
+import { authFetch } from '../../lib/api'
 
 async function readJson<T>(response: Response): Promise<T> {
   if (!response.ok) {
@@ -20,7 +21,7 @@ export async function fetchCodingSessions(): Promise<{
   sessions: CodingSession[]
   agentConnected: boolean
 }> {
-  return readJson(await fetch('/coding/sessions'))
+  return readJson(await authFetch('/coding/sessions'))
 }
 
 /**
@@ -34,7 +35,7 @@ export async function fetchCodingSession(
   afterSeq = 0,
 ): Promise<CodingSessionDetail> {
   return readJson(
-    await fetch(`/coding/sessions/${sessionId}?afterSeq=${afterSeq}`),
+    await authFetch(`/coding/sessions/${sessionId}?afterSeq=${afterSeq}`),
   )
 }
 
@@ -45,7 +46,7 @@ export async function startCodingSession(input: {
   projectId?: number | null
 }): Promise<{ sessionId: string; status: string; branch?: string; message?: string }> {
   return readJson(
-    await fetch('/coding/sessions', {
+    await authFetch('/coding/sessions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(input),
@@ -59,7 +60,7 @@ export async function sendCodingFeedback(
   steer = false,
 ): Promise<{ queued: boolean }> {
   return readJson(
-    await fetch(`/coding/sessions/${sessionId}/feedback`, {
+    await authFetch(`/coding/sessions/${sessionId}/feedback`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text, steer }),
@@ -68,14 +69,14 @@ export async function sendCodingFeedback(
 }
 
 export async function stopCodingSession(sessionId: string): Promise<{ status: string }> {
-  return readJson(await fetch(`/coding/sessions/${sessionId}/stop`, { method: 'POST' }))
+  return readJson(await authFetch(`/coding/sessions/${sessionId}/stop`, { method: 'POST' }))
 }
 
 /** Claude Code threads already on the Mac for this repo, newest first. */
 export async function fetchClaudeThreads(
   repo: string,
 ): Promise<{ repo: string; sessions: ClaudeThread[] }> {
-  return readJson(await fetch(`/coding/repos/${encodeURIComponent(repo)}/threads`))
+  return readJson(await authFetch(`/coding/repos/${encodeURIComponent(repo)}/threads`))
 }
 
 /**
@@ -90,7 +91,7 @@ export async function adoptClaudeThread(
   instructions?: string,
 ): Promise<{ sessionId: string; status: string }> {
   return readJson(
-    await fetch(
+    await authFetch(
       `/coding/repos/${encodeURIComponent(repo)}/threads/${sessionId}/adopt`,
       {
         method: 'POST',

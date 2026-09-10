@@ -14,6 +14,7 @@ import type { FaceMode } from './features/face/faceTypes'
 import { useNovaChat } from './features/nova/hooks/useNovaChat'
 import { useNovaRuntime } from './features/nova/hooks/useNovaRuntime'
 import './features/nova/styles/index.css'
+import { authFetch } from './lib/api'
 
 function App() {
   const {
@@ -102,7 +103,7 @@ function App() {
 
   const loadProjects = useCallback(async () => {
     try {
-      const response = await fetch('/projects')
+      const response = await authFetch('/projects')
       if (response.ok) {
         setProjects((await response.json()) as ProjectSummary[])
       }

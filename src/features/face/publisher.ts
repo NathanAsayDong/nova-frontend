@@ -11,12 +11,11 @@
  * connection comes back.
  */
 
-import { resolveWsUrlsForPath } from '../nova/utils'
+import { wsUrl } from '../../lib/api'
 import type { FaceMode } from './faceTypes'
 
 let socket: WebSocket | null = null
 let started = false
-let urlIndex = 0
 let reconnectTimer: number | null = null
 
 let lastMode: FaceMode = 'idle'
@@ -28,12 +27,13 @@ const LEVEL_MIN_INTERVAL_MS = 33
 const LEVEL_MIN_DELTA = 0.015
 
 function connect() {
-  const urls = resolveWsUrlsForPath('/ws/face')
-  const url = urls[urlIndex % urls.length]
+  // The relay is deliberately unauthenticated (a face tab on a kiosk has no
+  // login), so no session token goes on this URL.
+  const url = wsUrl('/ws/face', { auth: false, params: { role: 'pub' } })
 
   let candidate: WebSocket
   try {
-    candidate = new WebSocket(`${url}?role=pub`)
+    candidate = new WebSocket(url)
   } catch {
     scheduleReconnect()
     return
@@ -49,8 +49,6 @@ function connect() {
     if (socket === candidate) {
       socket = null
     }
-    // Rotate through candidate URLs (dev proxy first, backend direct after).
-    urlIndex += 1
     scheduleReconnect()
   }
 

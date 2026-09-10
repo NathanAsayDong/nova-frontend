@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { authFetch } from '../../../lib/api'
 
 export interface ModelOption {
   id: string
@@ -41,7 +42,7 @@ export const useSettings = () => {
     try {
       setLoading(true)
       setError(null)
-      const response = await fetch('http://localhost:8000/api/settings/models')
+      const response = await authFetch('/api/settings/models')
       if (!response.ok) throw new Error('Failed to fetch models')
       const data = await response.json()
       setModels(data)
@@ -56,7 +57,7 @@ export const useSettings = () => {
     try {
       setLoading(true)
       setError(null)
-      const response = await fetch('http://localhost:8000/api/settings/models', {
+      const response = await authFetch('/api/settings/models', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ model }),
@@ -86,7 +87,7 @@ export const useSettings = () => {
     try {
       setLoading(true)
       setError(null)
-      const response = await fetch('http://localhost:8000/api/settings/claude-credits')
+      const response = await authFetch('/api/settings/claude-credits')
       if (!response.ok) throw new Error('Failed to fetch credits')
       const data = await response.json()
       setCredits(data)

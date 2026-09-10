@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { authFetch } from '../../../lib/api'
 
 export type McpServerSummary = {
   id: number
@@ -33,7 +34,7 @@ export function McpServerPanel() {
 
   const loadServers = useCallback(async () => {
     try {
-      const response = await fetch('/mcp-servers')
+      const response = await authFetch('/mcp-servers')
       if (response.ok) {
         setServers((await response.json()) as McpServerSummary[])
       }
@@ -55,7 +56,7 @@ export function McpServerPanel() {
     setBusy(true)
     setError('')
     try {
-      const response = await fetch('/mcp-servers', {
+      const response = await authFetch('/mcp-servers', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -89,7 +90,7 @@ export function McpServerPanel() {
   const connectServer = async (serverId: number) => {
     setError('')
     try {
-      const response = await fetch(`/mcp-servers/${serverId}/oauth/start`, {
+      const response = await authFetch(`/mcp-servers/${serverId}/oauth/start`, {
         method: 'POST',
       })
       const body = (await response.json().catch(() => null)) as {
@@ -108,7 +109,7 @@ export function McpServerPanel() {
   const toggleServer = async (server: McpServerSummary) => {
     setError('')
     try {
-      const response = await fetch(`/mcp-servers/${server.id}`, {
+      const response = await authFetch(`/mcp-servers/${server.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled: !server.enabled }),
@@ -128,7 +129,7 @@ export function McpServerPanel() {
     }
     setError('')
     try {
-      const response = await fetch(`/mcp-servers/${server.id}`, {
+      const response = await authFetch(`/mcp-servers/${server.id}`, {
         method: 'DELETE',
       })
       if (!response.ok) {

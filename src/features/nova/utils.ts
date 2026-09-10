@@ -1,3 +1,5 @@
+import { wsUrl } from '../../lib/api'
+
 const conversationIdStorageKey = 'nova.conversationId'
 
 export function loadConversationId(): string | null {
@@ -26,33 +28,25 @@ export function clearConversationId(): void {
 
 const preferredMimeTypes = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'] as const
 
-export function resolveWsUrlsForPath(path: string): string[] {
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  const urls = [`${protocol}//${window.location.host}${path}`]
-
-  // Vite dev/preview serve on a different port than the backend; the proxy
-  // handles it, but fall back to the backend directly if it doesn't.
-  if (window.location.port === '5173' || window.location.port === '4173') {
-    const apiUrl = import.meta.env.VITE_API_URL || 'http://10.1.10.118:8000'
-    urls.push(`${protocol}//${new URL(apiUrl).host}${path}`)
-  }
-
-  return Array.from(new Set(urls))
+/**
+ * Candidate WebSocket URLs for a backend path, best first.
+ *
+ * There is one candidate now — the configured API host — but callers still
+ * loop over the list, so the shape is kept. `auth: false` leaves the session
+ * token off, which only the open face relay wants.
+ */
+export function resolveWsUrlsForPath(
+  path: string,
+  options: { auth?: boolean } = {},
+): string[] {
+  return [wsUrl(path, { auth: options.auth })]
 }
 
 export function resolveWsUrls(): string[] {
-  const fromEnv = import.meta.env.VITE_TRANSCRIBE_WS_URL
-  if (fromEnv) {
-    return [fromEnv as string]
-  }
   return resolveWsUrlsForPath('/ws/transcribe')
 }
 
 export function resolveMeetingWsUrls(): string[] {
-  const fromEnv = import.meta.env.VITE_MEETING_WS_URL
-  if (fromEnv) {
-    return [fromEnv as string]
-  }
   return resolveWsUrlsForPath('/ws/meeting')
 }
 

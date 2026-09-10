@@ -23,6 +23,7 @@ import {
 } from '../utils'
 import { createTurnDetector, type TurnDetector } from '../turnDetector'
 import { publishFaceLevel } from '../../face/publisher'
+import { authFetch } from '../../../lib/api'
 
 type UseNovaRuntimeResult = {
   isNovaEnabled: boolean
@@ -1332,7 +1333,7 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
   }
 
   const persistNovaPower = (enabled: boolean) => {
-    void fetch('/nova/power', {
+    void authFetch('/nova/power', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled }),
@@ -1465,7 +1466,7 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
     // deliberately-off Nova back on.
     const boot = async () => {
       try {
-        const response = await fetch('/nova/power')
+        const response = await authFetch('/nova/power')
         if (response.ok) {
           const data = (await response.json()) as { enabled?: boolean }
           if (data.enabled === false) {
