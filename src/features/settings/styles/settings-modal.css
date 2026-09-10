@@ -1,10 +1,20 @@
+/*
+ * Settings modal.
+ *
+ * Colours come from the app's tokens in src/index.css rather than being
+ * literal. This file used to hardcode a dark navy gradient with cyan accents,
+ * which was a whole different design language from the white-paper-and-green
+ * app it opens over — the modal read as a foreign window rather than part of
+ * Nova. The structure below is unchanged; only the palette moved.
+ */
+
 .settings-modal-overlay {
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
   bottom: 0;
-  background-color: rgba(0, 0, 0, 0.6);
+  background-color: rgba(34, 50, 42, 0.35);
   z-index: 999;
   animation: fadeIn 0.2s ease;
 }
@@ -23,9 +33,10 @@
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-  border-radius: 12px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8);
+  background: var(--paper);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow-float);
   z-index: 1000;
   max-width: 400px;
   width: 90%;
@@ -50,22 +61,23 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 20px;
-  border-bottom: 1px solid rgba(0, 212, 255, 0.2);
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--border);
 }
 
 .settings-modal-header h2 {
   margin: 0;
-  color: #00d4ff;
-  font-size: 20px;
-  font-weight: 600;
+  color: var(--green-ink);
+  font-size: 1.05rem;
+  font-weight: 800;
 }
 
 .close-btn {
   background: none;
   border: none;
-  color: #00d4ff;
-  font-size: 28px;
+  color: var(--muted);
+  font-size: 26px;
+  line-height: 1;
   cursor: pointer;
   padding: 0;
   width: 32px;
@@ -73,13 +85,13 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 6px;
-  transition: all 0.2s ease;
+  border-radius: 8px;
+  transition: background-color 150ms ease, color 150ms ease;
 }
 
 .close-btn:hover {
-  background-color: rgba(0, 212, 255, 0.1);
-  color: #00f0ff;
+  background-color: var(--green-soft);
+  color: var(--green-deep);
 }
 
 .settings-modal-content {
@@ -99,31 +111,32 @@
 .settings-item label {
   display: block;
   margin-bottom: 8px;
-  color: #00d4ff;
-  font-size: 14px;
-  font-weight: 600;
+  color: var(--green-ink);
+  font-size: 0.78rem;
+  font-weight: 700;
 }
 
 .settings-item select {
   width: 100%;
-  padding: 10px;
-  background-color: #0f3460;
-  color: #00d4ff;
-  border: 1px solid #00d4ff;
-  border-radius: 6px;
-  font-size: 14px;
+  padding: 9px 10px;
+  background-color: var(--paper);
+  color: var(--ink);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  font: inherit;
+  font-size: 0.85rem;
   cursor: pointer;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
 }
 
 .settings-item select:hover:not(:disabled) {
-  border-color: #00f0ff;
-  box-shadow: 0 0 8px rgba(0, 212, 255, 0.3);
+  border-color: var(--green);
 }
 
 .settings-item select:focus {
   outline: none;
-  border-color: #00f0ff;
-  box-shadow: 0 0 12px rgba(0, 212, 255, 0.5);
+  border-color: var(--green);
+  box-shadow: 0 0 0 3px var(--green-soft);
 }
 
 .settings-item select:disabled {
@@ -132,13 +145,13 @@
 }
 
 .settings-error {
-  background-color: rgba(255, 100, 100, 0.1);
-  border-left: 3px solid #ff6464;
+  background-color: #fdf0f0;
+  border-left: 3px solid #d97070;
   padding: 12px;
   margin-bottom: 16px;
-  border-radius: 4px;
-  color: #ff9999;
-  font-size: 13px;
+  border-radius: 6px;
+  color: #8f3a3a;
+  font-size: 0.8rem;
 }
 
 .credits-status {
@@ -146,15 +159,15 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  background-color: rgba(0, 212, 255, 0.05);
+  background-color: var(--green-mist);
   padding: 12px;
-  border-radius: 6px;
-  border-left: 3px solid #00d4ff;
+  border-radius: 8px;
+  border-left: 3px solid var(--green);
 }
 
 .credits-status.error {
-  border-left-color: #ff6464;
-  background-color: rgba(255, 100, 100, 0.05);
+  border-left-color: #d97070;
+  background-color: #fdf0f0;
 }
 
 .credits-display {
@@ -164,33 +177,33 @@
 }
 
 .credits-value {
-  font-size: 18px;
-  font-weight: 600;
-  color: #00d4ff;
+  font-size: 1.1rem;
+  font-weight: 800;
+  color: var(--green-ink);
 }
 
 .credits-label {
-  font-size: 12px;
-  color: #999;
+  font-size: 0.72rem;
+  color: var(--muted);
 }
 
 .settings-item button {
-  padding: 8px 12px;
-  background-color: #00d4ff;
-  color: #0f3460;
-  border: none;
-  border-radius: 6px;
-  font-weight: 600;
+  padding: 7px 14px;
+  background-color: var(--green-deep);
+  color: var(--paper);
+  border: 1px solid var(--green-deep);
+  border-radius: 999px;
+  font: inherit;
+  font-weight: 700;
+  font-size: 0.76rem;
   cursor: pointer;
-  transition: all 0.2s ease;
-  font-size: 13px;
+  transition: background-color 150ms ease, border-color 150ms ease;
   white-space: nowrap;
 }
 
 .settings-item button:hover:not(:disabled) {
-  background-color: #00f0ff;
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 212, 255, 0.3);
+  background-color: var(--green);
+  border-color: var(--green);
 }
 
 .settings-item button:disabled {
@@ -200,11 +213,11 @@
 
 .credits-status.error p {
   margin: 0;
-  color: #ff9999;
-  font-size: 13px;
+  color: #8f3a3a;
+  font-size: 0.8rem;
 }
 
 .credits-status.error button {
-  padding: 6px 10px;
-  font-size: 12px;
+  padding: 6px 12px;
+  font-size: 0.72rem;
 }

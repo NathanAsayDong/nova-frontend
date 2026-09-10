@@ -12,6 +12,7 @@ export const SettingsPanel = () => {
     [switchModel],
   )
 
+
   return (
     <div className="settings-panel">
       <h2>Settings</h2>
@@ -25,14 +26,14 @@ export const SettingsPanel = () => {
           <p>Loading...</p>
         ) : models ? (
           <div className="model-selector">
-            <select value={models.current_model} onChange={handleModelChange}>
-              {models.available_models.map(model => (
-                <option key={model} value={model}>
-                  {model}
+            <select value={models.current_model_id} onChange={handleModelChange}>
+              {models.models.map(model => (
+                <option key={model.id} value={model.id}>
+                  {model.display_name}
                 </option>
               ))}
             </select>
-            <p className="current-model">Current: {models.current_model}</p>
+            <p className="current-model">Current: {models.current_model_name}</p>
           </div>
         ) : (
           <p>Failed to load models</p>
