@@ -43,17 +43,13 @@ export const SettingsModal = ({ isOpen, onClose }: SettingsModalProps) => {
             <label>Claude Model</label>
             {models ? (
               <select
-                value={models.current_model}
+                value={models.current_model_id}
                 onChange={handleModelChange}
                 disabled={loading}
               >
-                {models.available_models.map(model => (
-                  <option key={model} value={model}>
-                    {model === 'claude-opus-4-1'
-                      ? 'Opus (Most capable)'
-                      : model === 'claude-sonnet-4-20250514'
-                        ? 'Sonnet (Balanced)'
-                        : 'Haiku (Fast & efficient)'}
+                {models.models.map(model => (
+                  <option key={model.id} value={model.id}>
+                    {model.display_name}
                   </option>
                 ))}
               </select>

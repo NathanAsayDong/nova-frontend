@@ -1,8 +1,28 @@
 import { useState, useEffect, useCallback } from 'react'
 
+export interface ModelOption {
+  id: string
+  display_name: string
+}
+
 interface ModelInfo {
+  /**
+   * What a picker renders: the id to send back, and the name to show. Both
+   * come from Anthropic via the backend, so a newly released model arrives
+   * already labelled and nothing here needs editing.
+   */
+  models: ModelOption[]
+  /** The same set as bare ids. Kept for callers that only need the values. */
   available_models: string[]
   current_model: string
+  /** The listed id `current_model` resolves to — what a <select> matches on. */
+  current_model_id: string
+  /**
+   * The current model's display name, resolved server-side. The stored id can
+   * be an alias (claude-haiku-4-5) while the list carries the dated snapshot
+   * it names, so matching the two here would show a bare id.
+   */
+  current_model_name: string
 }
 
 interface CreditsInfo {
@@ -44,7 +64,16 @@ export const useSettings = () => {
       if (!response.ok) throw new Error('Failed to switch model')
       const data = await response.json()
       if (data.success) {
-        setModels(prev => prev ? { ...prev, current_model: data.current_model } : null)
+        setModels(prev =>
+          prev
+            ? {
+                ...prev,
+                current_model: data.current_model,
+                current_model_id: data.current_model_id,
+                current_model_name: data.current_model_name,
+              }
+            : null,
+        )
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error')
