@@ -120,10 +120,12 @@ export function useNovaChat() {
         const parts = [...message.parts]
         const last = parts[parts.length - 1]
         if (part.kind === 'text' && last?.kind === 'text' && last.format === part.format) {
-          // Sentence chunks belong to one paragraph, not one bubble each.
+          // Deltas are whitespace-exact pieces of one reply, so they join as
+          // written — inserting a space here would split words the model
+          // streamed in two.
           parts[parts.length - 1] = {
             ...last,
-            text: `${last.text}${last.text ? ' ' : ''}${part.text}`,
+            text: `${last.text}${part.text}`,
           }
         } else {
           parts.push(part)
