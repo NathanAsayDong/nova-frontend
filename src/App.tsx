@@ -64,6 +64,8 @@ function App() {
     combinedVoiceLevel,
     retryRuntime,
     setNovaPower,
+    needsSoundUnlock,
+    enableSound,
   } = useNovaRuntime({
     onUserTranscript: addVoiceUserMessage,
     onPartialUserTranscript: updateVoiceDraft,
@@ -235,6 +237,8 @@ function App() {
                 isNovaEnabled={isNovaEnabled}
                 showMicEnableButton={showMicEnableButton}
                 onRetry={retryRuntime}
+                needsSoundUnlock={needsSoundUnlock}
+                onEnableSound={enableSound}
               />
             }
           />

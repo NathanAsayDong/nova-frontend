@@ -22,6 +22,7 @@ import {
   saveConversationId,
 } from '../utils'
 import { createTurnDetector, type TurnDetector } from '../turnDetector'
+import { SILENT_CLIP_DATA_URI } from '../silentClip'
 import { publishFaceLevel } from '../../face/publisher'
 import { authFetch } from '../../../lib/api'
 
@@ -40,6 +41,13 @@ type UseNovaRuntimeResult = {
   assistantText: string
   retryRuntime: () => void
   setNovaPower: (enabled: boolean) => void
+  /**
+   * The browser refused to play Nova's voice because no tap has unlocked
+   * audio yet (iOS Safari). The composer shows an "Enable sound" button
+   * that calls `enableSound` from inside the tap.
+   */
+  needsSoundUnlock: boolean
+  enableSound: () => void
 }
 
 type NovaRuntimeOptions = {
@@ -81,6 +89,7 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
   const [agentAudioLevel, setAgentAudioLevel] = useState(0)
   const [uiPhase, setUiPhase] = useState<UiPhase>('idle')
   const [assistantText, setAssistantText] = useState('')
+  const [needsSoundUnlock, setNeedsSoundUnlock] = useState(false)
 
   const wsRef = useRef<WebSocket | null>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
@@ -104,6 +113,14 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
   // playback should fall back to a plain element->destination connection.
   const agentGraphReadyRef = useRef<Promise<boolean> | null>(null)
   const agentLevelSmoothedRef = useRef(0)
+  // ONE element for every reply, for iOS: Safari grants "may play with sound"
+  // per element, inside a user gesture, and a `new Audio()` built when the
+  // reply arrives over the socket has never seen a gesture. This element is
+  // unlocked once (see unlockAudio) and every clip is played through it by
+  // swapping its src.
+  const agentAudioElementRef = useRef<HTMLAudioElement | null>(null)
+  const audioUnlockedRef = useRef(false)
+  // The element while a clip is actually playing through it; null between.
   const activeAgentAudioRef = useRef<HTMLAudioElement | null>(null)
   const activePlaybackDoneRef = useRef<(() => void) | null>(null)
   const suppressAssistantAudioUntilNextTurnRef = useRef(false)
@@ -233,13 +250,10 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
   }
 
   const cleanupAgentAudioAnalysis = () => {
-    // Only detach the finished clip; the context and meter node live for the
-    // whole session so the worklet never reloads between clips.
-    if (agentSourceNodeRef.current) {
-      agentSourceNodeRef.current.disconnect()
-      agentSourceNodeRef.current = null
-    }
-
+    // Levels only. The element, its source node, the context and the meter
+    // all live for the whole session: createMediaElementSource may be called
+    // once per element, and once called the element's sound only ever comes
+    // out through the context, so the wiring is permanent by nature.
     agentLevelSmoothedRef.current = 0
     setAgentAudioLevel(0)
     publishFaceLevel(0)
@@ -247,6 +261,16 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
 
   const closeAgentAudioGraph = () => {
     cleanupAgentAudioAnalysis()
+    if (agentSourceNodeRef.current) {
+      agentSourceNodeRef.current.disconnect()
+      agentSourceNodeRef.current = null
+    }
+    if (agentAudioElementRef.current) {
+      agentAudioElementRef.current.pause()
+      agentAudioElementRef.current.src = ''
+      agentAudioElementRef.current = null
+    }
+    audioUnlockedRef.current = false
     if (agentMeterNodeRef.current) {
       agentMeterNodeRef.current.port.onmessage = null
       agentMeterNodeRef.current.disconnect()
@@ -270,7 +294,9 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
     const activeAudio = activeAgentAudioRef.current
     if (activeAudio) {
       activeAudio.pause()
-      activeAudio.src = ''
+      activeAudio.onended = null
+      activeAudio.onerror = null
+      activeAudio.removeAttribute('src')
       activeAudio.load()
       activeAgentAudioRef.current = null
     }
@@ -557,6 +583,63 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
     audioQueueRef.current.push({ kind: 'stream', streamId })
   }
 
+  const getAgentAudioElement = (): HTMLAudioElement => {
+    if (!agentAudioElementRef.current) {
+      const audio = new Audio()
+      audio.preload = 'auto'
+      // iOS: without this an <audio> with a video-capable container can try
+      // to go fullscreen. Harmless elsewhere.
+      audio.setAttribute('playsinline', '')
+      agentAudioElementRef.current = audio
+    }
+    return agentAudioElementRef.current
+  }
+
+  /**
+   * Make Nova audible on iOS. Must run synchronously inside a user gesture.
+   *
+   * Plays a silent clip through the shared element so Safari marks it as
+   * user-activated, and creates/resumes the agent AudioContext while the
+   * gesture is live. Both are one-time; afterwards replies that arrive over
+   * the socket may start on their own. Wired to the power tap, the retry
+   * tap, the "Enable sound" button, and the first tap anywhere on the page.
+   */
+  const unlockAudio = () => {
+    if (audioUnlockedRef.current) {
+      return
+    }
+
+    // Create the context inside the gesture (the async body runs to its
+    // first await synchronously) and resume it if it started suspended.
+    void ensureAgentAudioGraph()
+    const audioContext = agentAudioContextRef.current
+    if (audioContext && audioContext.state === 'suspended') {
+      void audioContext.resume().catch(() => {})
+    }
+
+    // A clip is already playing, so the browser has evidently allowed it; do
+    // not interrupt it with the silent clip.
+    if (activeAgentAudioRef.current) {
+      audioUnlockedRef.current = true
+      setNeedsSoundUnlock(false)
+      return
+    }
+
+    const audio = getAgentAudioElement()
+    audio.src = SILENT_CLIP_DATA_URI
+    const attempt = audio.play()
+    if (attempt) {
+      attempt
+        .then(() => {
+          audioUnlockedRef.current = true
+          setNeedsSoundUnlock(false)
+        })
+        .catch(() => {
+          // Still locked; the "Enable sound" button stays until a tap works.
+        })
+    }
+  }
+
   const ensureAgentAudioGraph = (): Promise<boolean> => {
     if (!agentGraphReadyRef.current) {
       agentGraphReadyRef.current = (async () => {
@@ -601,10 +684,30 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
       return
     }
 
+    if (audioContext.state === 'suspended') {
+      // resume() can hang on iOS when no gesture has happened yet, so it is
+      // raced rather than awaited outright.
+      await Promise.race([
+        audioContext.resume().catch(() => undefined),
+        new Promise<void>((resolve) => window.setTimeout(resolve, 400)),
+      ])
+    }
+
+    // Already wired: the same element plays every clip, and a media element
+    // may only be turned into a source once.
+    if (agentSourceNodeRef.current) {
+      return
+    }
+
+    // Wiring an element into a context that is not running would mute it,
+    // permanently, since the element's sound then only exists inside the
+    // context. Better an unmetered clip than a silent one: skip the meter
+    // for now and try again on the next clip.
+    if (audioContext.state !== 'running') {
+      return
+    }
+
     try {
-      if (audioContext.state === 'suspended') {
-        void audioContext.resume()
-      }
       const source = audioContext.createMediaElementSource(audio)
       if (hasMeter && agentMeterNodeRef.current) {
         source.connect(agentMeterNodeRef.current)
@@ -614,6 +717,18 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
       agentSourceNodeRef.current = source
     } catch {
       setAgentAudioLevel(0)
+    }
+  }
+
+  /** What to do when play() is refused: name it, and offer the tap that fixes it. */
+  const handlePlaybackRefused = (error: unknown) => {
+    const name = error instanceof Error ? error.name : ''
+    if (name === 'NotAllowedError') {
+      audioUnlockedRef.current = false
+      setNeedsSoundUnlock(true)
+      setStatusMessage('Tap "Enable sound" to hear Nova.')
+    } else {
+      setStatusMessage('Tap anywhere if browser blocks autoplay.')
     }
   }
 
@@ -629,10 +744,21 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
       const streamBlob = new Blob(streamBuffer.chunks, { type: streamBuffer.mimeType })
       const streamUrl = URL.createObjectURL(streamBlob)
       currentAudioUrlRef.current = streamUrl
-      const audio = new Audio(streamUrl)
+      const audio = getAgentAudioElement()
+      audio.src = streamUrl
       activeAgentAudioRef.current = audio
       await startAgentAudioAnalysis(audio)
-      await audio.play()
+      try {
+        await audio.play()
+        audioUnlockedRef.current = true
+        setNeedsSoundUnlock(false)
+      } catch (error) {
+        handlePlaybackRefused(error)
+        if (activeAgentAudioRef.current === audio) {
+          activeAgentAudioRef.current = null
+        }
+        throw error
+      }
       await new Promise<void>((resolve) => {
         const finish = () => {
           if (activePlaybackDoneRef.current === finish) {
@@ -657,7 +783,8 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
     const audioUrl = URL.createObjectURL(mediaSource)
     currentAudioUrlRef.current = audioUrl
 
-    const audio = new Audio(audioUrl)
+    const audio = getAgentAudioElement()
+    audio.src = audioUrl
     activeAgentAudioRef.current = audio
     // Kick off the meter hookup but do NOT await it yet: 'sourceopen' can
     // fire while the worklet module is still loading, and a listener attached
@@ -720,9 +847,13 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
         await appendChunk(nextChunk)
         if (!playTriggered) {
           playTriggered = true
-          void audio.play().catch(() => {
-            setStatusMessage('Tap anywhere if browser blocks autoplay.')
-          })
+          void audio
+            .play()
+            .then(() => {
+              audioUnlockedRef.current = true
+              setNeedsSoundUnlock(false)
+            })
+            .catch(handlePlaybackRefused)
         }
         continue
       }
@@ -1356,6 +1487,8 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
     }
 
     setStatusMessage('Starting Nova...')
+    // This is a tap: the one moment iOS lets us make the reply audible.
+    unlockAudio()
     playBootupCue()
     pendingPowerOnListenRef.current = true
     void initializeRuntime()
@@ -1363,6 +1496,7 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
 
   const retryRuntime = () => {
     setStatusMessage('Retrying microphone setup...')
+    unlockAudio()
     void initializeRuntime()
   }
 
@@ -1500,8 +1634,18 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
 
     navigator.mediaDevices?.addEventListener?.('devicechange', handleDeviceChange)
 
+    // Nova boots without a tap on page load, so the power button is not
+    // guaranteed to be pressed before the first reply. Any first tap or key
+    // on the page unlocks audio instead. Cheap: a no-op once unlocked.
+    const gestureEvents = ['touchend', 'mousedown', 'keydown'] as const
+    const handleFirstGesture = () => unlockAudio()
+    gestureEvents.forEach((name) =>
+      document.addEventListener(name, handleFirstGesture, { passive: true }),
+    )
+
     return () => {
       cancelled = true
+      gestureEvents.forEach((name) => document.removeEventListener(name, handleFirstGesture))
       navigator.mediaDevices?.removeEventListener?.('devicechange', handleDeviceChange)
       streamBuffers.forEach((streamBuffer) => {
         streamBuffer.ended = true
@@ -1536,5 +1680,7 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
     assistantText,
     retryRuntime,
     setNovaPower,
+    needsSoundUnlock,
+    enableSound: unlockAudio,
   }
 }
