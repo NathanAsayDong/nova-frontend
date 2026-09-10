@@ -924,3 +924,155 @@
   border-color: var(--green);
   background: var(--green-mist);
 }
+
+/* ---- phones ----
+   Same surfaces, same palette; only the geometry changes. The header's
+   action row scrolls sideways instead of forcing the page wider, the
+   composer hugs the bottom edge above the home indicator, and text inputs
+   are 16px so iOS Safari does not zoom in on focus. */
+
+.novaWorkspace {
+  min-width: 0;
+  max-width: 100%;
+}
+
+@media (max-width: 720px) {
+  .novaHeader {
+    padding: 10px 14px 10px;
+  }
+
+  .novaHeaderTop {
+    flex-wrap: wrap;
+    row-gap: 10px;
+  }
+
+  .novaBrand {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  /* One row, scrolls sideways. The buttons keep their shape; the
+     scrollbar is hidden because the row's edge already implies more.
+     Qualified with .novaHeader because meetings.css declares this class
+     too (flex: 0 0 auto) and loads later. */
+  .novaHeader .novaHeaderActions {
+    flex: 1 1 100%;
+    width: 100%;
+    min-width: 0;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding-bottom: 2px;
+    /* Room so the outermost buttons' focus rings are not clipped. */
+    margin-inline: -2px;
+    padding-inline: 2px;
+  }
+
+  .novaHeader .novaHeaderActions::-webkit-scrollbar {
+    display: none;
+  }
+
+  .headerButton {
+    white-space: nowrap;
+  }
+
+  .novaHeaderMeta {
+    gap: 8px 14px;
+    margin-top: 8px;
+  }
+
+  .metaItem {
+    min-width: 0;
+  }
+
+  .metaValue {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 40vw;
+  }
+
+  .projectList {
+    max-height: 150px;
+  }
+
+  .conversationScroll {
+    padding: 16px 14px 8px;
+    gap: 16px;
+  }
+
+  .messageBody {
+    padding: 10px 12px;
+    border-radius: 14px;
+  }
+
+  .artifactPre {
+    max-height: 260px;
+  }
+
+  .composer {
+    width: calc(100% - 20px);
+    margin: 4px auto calc(10px + env(safe-area-inset-bottom, 0px));
+    padding: 8px 8px 8px 10px;
+    border-radius: 18px;
+  }
+
+  .composerInput {
+    /* 16px: below that iOS Safari zooms the page when the field focuses. */
+    font-size: 1rem;
+    padding: 8px 4px;
+  }
+
+  .composerButton {
+    padding: 10px 14px;
+  }
+
+  .micRetry {
+    padding: 8px 10px;
+  }
+
+  /* MCP panel: the URL field takes its own line instead of a 220px floor. */
+  .mcpItem {
+    flex-wrap: wrap;
+    row-gap: 2px;
+  }
+
+  .mcpUrl {
+    max-width: 100%;
+    flex: 1 1 100%;
+  }
+
+  .mcpInput {
+    min-width: 0;
+    flex: 1 1 120px;
+    font-size: 1rem;
+  }
+
+  .mcpInputUrl {
+    min-width: 0;
+    flex: 1 1 100%;
+  }
+}
+
+/* Bigger tap targets where there is a finger and not a pointer. Padding
+   only, so the buttons read the same. */
+@media (pointer: coarse) {
+  .headerButton,
+  .meetingToggle {
+    padding-block: 8px;
+  }
+
+  .powerToggle {
+    width: 30px;
+    height: 30px;
+  }
+
+  .settingsToggle {
+    width: 34px;
+    height: 34px;
+  }
+
+  .metaToggle {
+    padding: 6px 4px;
+  }
+}

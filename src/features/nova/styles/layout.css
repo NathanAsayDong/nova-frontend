@@ -7,6 +7,10 @@
      can still be scrolled programmatically (e.g. focus/scrollIntoView). */
   overflow: clip;
   display: grid;
+  /* minmax(0, 1fr), not the implicit `auto`: a grid track defaults to a
+     min-content floor, so a header row of buttons that does not fit a phone
+     would widen the whole workspace past the viewport instead of wrapping. */
+  grid-template-columns: minmax(0, 1fr);
   place-items: center;
   isolation: isolate;
 }

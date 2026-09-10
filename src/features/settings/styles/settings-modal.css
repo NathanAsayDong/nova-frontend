@@ -281,3 +281,30 @@
   background-color: #fdecec;
   border-color: #d97070;
 }
+
+/* ---- phones ---- */
+
+@media (max-width: 480px) {
+  .settings-modal {
+    width: calc(100% - 24px);
+    max-width: none;
+    max-height: calc(100dvh - 24px - env(safe-area-inset-bottom, 0px));
+  }
+
+  .settings-modal-header {
+    padding: 14px 16px;
+  }
+
+  .settings-modal-content {
+    padding: 16px;
+  }
+
+  .settings-item select {
+    /* 16px: below that iOS Safari zooms the page when the field focuses. */
+    font-size: 1rem;
+  }
+
+  .session-actions button {
+    flex: 1 1 auto;
+  }
+}

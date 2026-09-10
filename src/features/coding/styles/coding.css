@@ -384,7 +384,19 @@
 
 @media (max-width: 760px) {
   .codingBody {
-    grid-template-columns: 1fr;
+    /* minmax(0, 1fr): a bare 1fr keeps a min-content floor, and one long
+       unbroken token in a session title would widen the column past the
+       phone. */
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .codingList,
+  .codingDetail {
+    min-width: 0;
+  }
+  .codingListItemTitle,
+  .codingDetailTitle,
+  .codingRollup {
+    overflow-wrap: anywhere;
   }
   .codingList {
     max-height: 150px;
@@ -441,4 +453,51 @@
 .codingThreadList .codingButton {
   padding: 6px 12px;
   font-size: 0.78rem;
+}
+
+/* ---- phones ---- */
+
+@media (max-width: 720px) {
+  .codingPanel {
+    padding: 12px 14px 14px;
+    gap: 10px;
+  }
+
+  .codingPanelHeader {
+    gap: 10px;
+  }
+
+  .codingPanelTitle {
+    font-size: 1.02rem;
+  }
+
+  .codingPanelActions {
+    flex-wrap: wrap;
+  }
+
+  .codingStartForm input,
+  .codingStartForm textarea,
+  .codingFeedback textarea {
+    /* 16px: below that iOS Safari zooms the page when the field focuses. */
+    font-size: 1rem;
+  }
+
+  .codingDetail,
+  .codingStartForm,
+  .codingThreads {
+    padding: 12px;
+  }
+
+  .codingFeedbackActions {
+    flex-wrap: wrap;
+  }
+
+  .codingThreadList li {
+    flex-wrap: wrap;
+  }
+
+  .codingArtifact pre {
+    max-height: 220px;
+    font-size: 0.7rem;
+  }
 }

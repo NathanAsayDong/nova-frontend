@@ -602,3 +602,74 @@ select.meetingInput {
   opacity: 0.55;
   cursor: default;
 }
+
+/* ---- phones ---- */
+
+@media (max-width: 720px) {
+  .meetingView,
+  .meetingsPanel {
+    padding: 12px 14px 14px;
+    gap: 10px;
+  }
+
+  .meetingViewHeader,
+  .meetingsPanelHeader {
+    gap: 10px;
+  }
+
+  .meetingViewTitle,
+  .meetingsPanelTitle {
+    font-size: 1.02rem;
+  }
+
+  .meetingScroll,
+  .meetingsPanelBody {
+    padding: 12px 14px;
+    border-radius: 12px;
+  }
+
+  .meetingSegment {
+    gap: 10px;
+    font-size: 0.92rem;
+  }
+
+  .meetingTime {
+    width: 2.9rem;
+  }
+
+  /* The start form: fields stack, the buttons take the last row. */
+  .meetingStartForm {
+    width: calc(100% - 28px);
+    margin: 10px auto 0;
+    padding: 14px;
+    gap: 12px;
+  }
+
+  .meetingField,
+  .meetingField.wide {
+    flex: 1 1 100%;
+  }
+
+  .meetingInput {
+    /* 16px: below that iOS Safari zooms the page when the field focuses. */
+    font-size: 1rem;
+  }
+
+  .meetingFormActions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .meetingDetailControls {
+    gap: 8px;
+  }
+
+  .meetingProcessingBanner {
+    margin-inline: 14px;
+    width: auto;
+  }
+
+  .meetingsListItem {
+    padding: 10px 12px;
+  }
+}

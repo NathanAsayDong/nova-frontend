@@ -158,3 +158,13 @@
   font-weight: 700;
   letter-spacing: 0.02em;
 }
+
+@media (max-width: 480px) {
+  .loginShell {
+    padding: 1rem 1rem calc(1rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  .loginCard {
+    padding: 1.6rem 1.25rem;
+  }
+}
