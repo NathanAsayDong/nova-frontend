@@ -178,6 +178,10 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
   const analysisTimerRef = useRef<number | null>(null)
   const analysisDataRef = useRef<Uint8Array<ArrayBuffer> | null>(null)
   const prerollNodeRef = useRef<DelayNode | null>(null)
+  // The audio-thread level meter that drives the turn detector, and the
+  // silent sink that keeps the graph pulling it.
+  const micMeterNodeRef = useRef<AudioWorkletNode | null>(null)
+  const micMeterSinkRef = useRef<GainNode | null>(null)
   // The mic, PREROLL_MS late. What recordings are made from.
   const recordStreamRef = useRef<MediaStream | null>(null)
   // The detector saw silence begin here; the speech_pause flush waits for the
@@ -322,6 +326,15 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
     if (prerollNodeRef.current) {
       prerollNodeRef.current.disconnect()
       prerollNodeRef.current = null
+    }
+    if (micMeterNodeRef.current) {
+      micMeterNodeRef.current.port.onmessage = null
+      micMeterNodeRef.current.disconnect()
+      micMeterNodeRef.current = null
+    }
+    if (micMeterSinkRef.current) {
+      micMeterSinkRef.current.disconnect()
+      micMeterSinkRef.current = null
     }
     recordStreamRef.current = null
     if (pauseFlushTimerRef.current !== null) {
@@ -1586,32 +1599,13 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
     let lastPublishedAt = 0
     let lastTickAt = performance.now()
 
-    // A timer, deliberately NOT requestAnimationFrame. rAF stops completely
-    // while the tab or window is hidden — and the user watches the face page
-    // or the server logs while talking, so a rAF-driven detector froze
-    // mid-turn and the recorder ran until they clicked back. rAF also runs at
-    // whatever the monitor refreshes at (60Hz laptop, 144Hz gaming tower),
-    // which made every per-frame constant machine-dependent. A 25ms interval
-    // is steady on a visible tab and degrades to ~1s ticks on a hidden one —
-    // coarse, but the turn still ends. All smoothing is dt-aware so the
-    // cadence change alters resolution, not behavior.
-    const tick = () => {
-      const activeAnalyser = analyserRef.current
-      const activeData = analysisDataRef.current
-
-      if (!activeAnalyser || !activeData) {
-        return
-      }
-
-      activeAnalyser.getByteTimeDomainData(activeData)
-
-      let sumSquares = 0
-      for (let i = 0; i < activeData.length; i += 1) {
-        const normalized = (activeData[i] - 128) / 128
-        sumSquares += normalized * normalized
-      }
-
-      const rms = Math.sqrt(sumSquares / activeData.length)
+    // Fed one RMS reading at a time, from whichever source is running.
+    // Deliberately NOT requestAnimationFrame: rAF stops completely while the
+    // tab is hidden — and the user watches the face page or the server logs
+    // while talking, so a rAF-driven detector froze mid-turn. All smoothing
+    // is dt-aware, so the cadence of the source alters resolution, not
+    // behavior.
+    const applyLevel = (rms: number) => {
       const amplified = Math.min(1, rms * 2.8)
 
       const now = performance.now()
@@ -1631,7 +1625,59 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
       }
     }
 
-    analysisTimerRef.current = window.setInterval(tick, 25)
+    // Until the audio-thread meter is up (and if it never comes up), read
+    // the analyser on a 25ms timer. Chrome throttles timers in hidden tabs —
+    // to about once a minute after five minutes hidden — which starved the
+    // detector of a Sentry tab left in the background: it chimed on "Hey
+    // Nova" and then never heard the request. Hence the worklet below.
+    const readAnalyser = () => {
+      const activeAnalyser = analyserRef.current
+      const activeData = analysisDataRef.current
+      if (!activeAnalyser || !activeData) {
+        return
+      }
+      activeAnalyser.getByteTimeDomainData(activeData)
+      let sumSquares = 0
+      for (let i = 0; i < activeData.length; i += 1) {
+        const normalized = (activeData[i] - 128) / 128
+        sumSquares += normalized * normalized
+      }
+      applyLevel(Math.sqrt(sumSquares / activeData.length))
+    }
+    analysisTimerRef.current = window.setInterval(readAnalyser, 25)
+
+    // The audio thread is never throttled, and the messages it posts are
+    // not timers, so this keeps the detector at full cadence in a hidden tab.
+    void audioContext.audioWorklet
+      .addModule('/mic-level-worklet.js')
+      .then(() => {
+        // Torn down (or rebuilt) while the module loaded.
+        if (audioContextRef.current !== audioContext) {
+          return
+        }
+        const meter = new AudioWorkletNode(audioContext, 'mic-level', {
+          numberOfInputs: 1,
+          numberOfOutputs: 1,
+          channelCount: 1,
+        })
+        // A node only renders while something downstream pulls it; a muted
+        // gain into the destination does that without making a sound.
+        const sink = audioContext.createGain()
+        sink.gain.value = 0
+        meter.port.onmessage = (event: MessageEvent<number>) => applyLevel(event.data)
+        source.connect(meter)
+        meter.connect(sink)
+        sink.connect(audioContext.destination)
+        micMeterNodeRef.current = meter
+        micMeterSinkRef.current = sink
+        if (analysisTimerRef.current !== null) {
+          window.clearInterval(analysisTimerRef.current)
+          analysisTimerRef.current = null
+        }
+      })
+      .catch(() => {
+        // No worklet support: the timer above stays the source.
+      })
   }
 
   const initializeRuntime = async () => {
