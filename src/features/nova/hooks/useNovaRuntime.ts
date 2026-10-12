@@ -44,6 +44,16 @@ const SENTRY_WAKE_GRACE_MS = 900
 const SENTRY_LISTEN_TIMEOUT_MS = 8000
 const SENTRY_WAITING_MESSAGE = 'Sentry: say "Hey Nova" to ask something.'
 
+// How much audio from BEFORE the voice detector fires each recording keeps.
+// The detector only fires once the level crosses its threshold, by which
+// point a soft opening ("Say…", "Add…") is already gone — "Say hi to Brad"
+// arrived as "Hi to Brad." So the recorder listens through a delay line of
+// this length while the detector reads the live mic: starting the recorder
+// at onset captures from half a second earlier.
+const PREROLL_MS = 500
+// Slack on top of the pre-roll for the recorder's own buffering.
+const PREROLL_SLACK_MS = 60
+
 /**
  * One recording, from recorder start to its final flush.
  *
@@ -64,6 +74,9 @@ type ActiveCapture = {
   // Every send for this capture is chained here, so chunks keep their order
   // and the stop message waits for the final flush.
   delivery: Promise<void>
+  // This recording's lag behind the live mic: PREROLL_MS when it records
+  // through the delay line, 0 when it fell back to the raw stream.
+  lagMs: number
 }
 
 type UseNovaRuntimeResult = {
@@ -164,6 +177,13 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
   const sourceNodeRef = useRef<MediaStreamAudioSourceNode | null>(null)
   const analysisTimerRef = useRef<number | null>(null)
   const analysisDataRef = useRef<Uint8Array<ArrayBuffer> | null>(null)
+  const prerollNodeRef = useRef<DelayNode | null>(null)
+  // The mic, PREROLL_MS late. What recordings are made from.
+  const recordStreamRef = useRef<MediaStream | null>(null)
+  // The detector saw silence begin here; the speech_pause flush waits for the
+  // delayed recording to catch up to this point.
+  const speechPausedAtRef = useRef<number | null>(null)
+  const pauseFlushTimerRef = useRef<number | null>(null)
   const agentAudioContextRef = useRef<AudioContext | null>(null)
   const agentMeterNodeRef = useRef<AudioWorkletNode | null>(null)
   const agentSourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null)
@@ -298,6 +318,17 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
       sourceNodeRef.current.disconnect()
       sourceNodeRef.current = null
     }
+
+    if (prerollNodeRef.current) {
+      prerollNodeRef.current.disconnect()
+      prerollNodeRef.current = null
+    }
+    recordStreamRef.current = null
+    if (pauseFlushTimerRef.current !== null) {
+      window.clearTimeout(pauseFlushTimerRef.current)
+      pauseFlushTimerRef.current = null
+    }
+    speechPausedAtRef.current = null
 
     if (analyserRef.current) {
       analyserRef.current.disconnect()
@@ -538,10 +569,16 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
     // the old (now closed) conversation.
     conversationIdRef.current = loadConversationId() || null
 
+    // Through the delay line when the audio graph is running; a suspended
+    // context would hand the recorder silence, so fall back to the raw mic
+    // (no pre-roll) rather than risk an empty turn.
+    const delayed =
+      audioContextRef.current?.state === 'running' ? recordStreamRef.current : null
+    const recordStream = delayed ?? mediaStreamRef.current
     const mimeType = bestMimeType()
     const recorder = mimeType
-      ? new MediaRecorder(mediaStreamRef.current, { mimeType })
-      : new MediaRecorder(mediaStreamRef.current)
+      ? new MediaRecorder(recordStream, { mimeType })
+      : new MediaRecorder(recordStream)
     recorderMimeTypeRef.current = recorder.mimeType || recorderMimeTypeRef.current
 
     // A sentry capture tells the backend nothing until it is promoted.
@@ -559,6 +596,7 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
       discarded: false,
       utteranceEnded: false,
       delivery: Promise.resolve(),
+      lagMs: delayed ? PREROLL_MS : 0,
     }
     activeCaptureRef.current = capture
 
@@ -1519,6 +1557,16 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
 
     source.connect(analyser)
 
+    // The pre-roll tap: the same mic through a delay line, for the recorder.
+    const preroll = audioContext.createDelay(1)
+    preroll.delayTime.value = PREROLL_MS / 1000
+    const recordTap = audioContext.createMediaStreamDestination()
+    recordTap.channelCount = 1
+    source.connect(preroll)
+    preroll.connect(recordTap)
+    prerollNodeRef.current = preroll
+    recordStreamRef.current = recordTap.stream
+
     audioContextRef.current = audioContext
     analyserRef.current = analyser
     sourceNodeRef.current = source
@@ -1836,10 +1884,15 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
       }
     },
     onSpeechPause: () => {
+      speechPausedAtRef.current = performance.now()
       if (uiPhaseRef.current !== 'listening') {
         return
       }
-      if (isLiveTurnCapture()) {
+      const flush = () => {
+        pauseFlushTimerRef.current = null
+        if (uiPhaseRef.current !== 'listening' || !isLiveTurnCapture()) {
+          return
+        }
         // Flush the recorder first: the audio holding the last words is
         // still in its internal buffer, and the backend is about to
         // transcribe. The flushed chunk is what tells it the buffer is
@@ -1854,8 +1907,25 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
         // the silence window instead of after it.
         sendSocketEvent({ event: 'speech_pause' })
       }
+      // The recording runs behind the live mic by the pre-roll, so the last
+      // words have not reached it yet: flush once they have.
+      const lag = activeCaptureRef.current?.lagMs ?? 0
+      if (pauseFlushTimerRef.current !== null) {
+        window.clearTimeout(pauseFlushTimerRef.current)
+      }
+      if (lag > 0) {
+        pauseFlushTimerRef.current = window.setTimeout(flush, lag + PREROLL_SLACK_MS)
+      } else {
+        flush()
+      }
     },
     onSpeechResume: () => {
+      speechPausedAtRef.current = null
+      if (pauseFlushTimerRef.current !== null) {
+        // Talking again before the flush went out: there was no pause to report.
+        window.clearTimeout(pauseFlushTimerRef.current)
+        pauseFlushTimerRef.current = null
+      }
       if (uiPhaseRef.current !== 'listening') {
         return
       }
@@ -1882,8 +1952,21 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
       if (!isLiveTurnCapture()) {
         return
       }
-      stopCapture(capturePurposeRef.current === 'sentry' ? 'sentry' : 'turn')
+      const purpose = capturePurposeRef.current === 'sentry' ? 'sentry' : 'turn'
       setThinking('Transcribing and generating response...')
+      // The recording lags the mic by the pre-roll. The silence window is
+      // normally longer than that, so the last words are already in; only a
+      // window shorter than the lag (a low NOVA_ENDPOINT_SCALE) waits out
+      // the difference, so the tail of the turn is never cut.
+      const lag = activeCaptureRef.current?.lagMs ?? 0
+      const silentFor =
+        speechPausedAtRef.current === null ? 0 : performance.now() - speechPausedAtRef.current
+      const wait = lag > 0 ? Math.max(0, lag + PREROLL_SLACK_MS - silentFor) : 0
+      if (wait > 0) {
+        window.setTimeout(() => stopCapture(purpose), wait)
+      } else {
+        stopCapture(purpose)
+      }
     },
   }
 
