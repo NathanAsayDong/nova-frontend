@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { UiPhase } from '../types'
+import type { UiPhase, VoiceMode } from '../types'
 import { SettingsModal } from '../../settings'
 import { McpServerPanel } from './McpServerPanel'
 
@@ -17,6 +17,8 @@ type ConversationHeaderProps = {
   /** A typed turn is streaming; uiPhase only tracks the voice pipeline. */
   isStreaming: boolean
   isNovaEnabled: boolean
+  /** Sentry answers one request per wake phrase instead of holding a conversation. */
+  voiceMode: VoiceMode
   /** A meeting is recording, so Nova is transcribing rather than listening. */
   isMeetingMode: boolean
   /** Blocks the toggle while a meeting is starting or being written up. */
@@ -25,6 +27,7 @@ type ConversationHeaderProps = {
   isCodingPanelOpen: boolean
   onNewConversation: () => void
   onTogglePower: () => void
+  onToggleSentry: () => void
   onToggleMeeting: () => void
   onToggleMeetingsPanel: () => void
   onToggleCodingPanel: () => void
@@ -44,12 +47,14 @@ export function ConversationHeader({
   uiPhase,
   isStreaming,
   isNovaEnabled,
+  voiceMode,
   isMeetingMode,
   isMeetingBusy,
   isMeetingsPanelOpen,
   isCodingPanelOpen,
   onNewConversation,
   onTogglePower,
+  onToggleSentry,
   onToggleMeeting,
   onToggleMeetingsPanel,
   onToggleCodingPanel,
@@ -62,6 +67,9 @@ export function ConversationHeader({
 
   // Chat and speech are one conversation, so the status reflects either one.
   const phase: UiPhase = isStreaming && uiPhase === 'idle' ? 'thinking' : uiPhase
+  const isSentry = voiceMode === 'sentry'
+  // Idle in sentry is not idle: it is waiting for "Hey Nova".
+  const phaseLabel = isSentry && phase === 'idle' ? 'Sentry' : PHASE_LABEL[phase]
 
   return (
     <header className="novaHeader">
@@ -74,7 +82,7 @@ export function ConversationHeader({
             }`}
           >
             <span className="phaseDot" aria-hidden="true" />
-            {isMeetingMode ? 'In a meeting' : isNovaEnabled ? PHASE_LABEL[phase] : 'Offline'}
+            {isMeetingMode ? 'In a meeting' : isNovaEnabled ? phaseLabel : 'Offline'}
           </span>
           <button
             type="button"
@@ -101,6 +109,21 @@ export function ConversationHeader({
                 strokeLinecap="round"
               />
             </svg>
+          </button>
+          <button
+            type="button"
+            className={`meetingToggle sentryToggle ${isSentry ? 'active' : ''}`}
+            onClick={onToggleSentry}
+            disabled={isMeetingMode}
+            aria-pressed={isSentry}
+            title={
+              isSentry
+                ? 'Sentry is on: Nova answers one request per "Hey Nova", then waits. Click for normal conversation.'
+                : 'Sentry: Nova only answers when addressed with "Hey Nova", one request at a time. For rooms with other people talking.'
+            }
+          >
+            {isSentry ? <span className="sentryDot" aria-hidden="true" /> : null}
+            Sentry
           </button>
         </div>
 

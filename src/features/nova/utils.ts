@@ -63,34 +63,6 @@ export function base64ToArrayBuffer(base64Data: string): ArrayBuffer {
   return bytes.buffer
 }
 
-function normalizeWakeText(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim()
-}
-
-export function containsWakePhrase(value: string): boolean {
-  const normalized = normalizeWakeText(value)
-  if (!normalized) {
-    return false
-  }
-
-  const tokens = normalized.split(' ')
-  if (tokens.length === 0) {
-    return false
-  }
-
-  const wakePrefixes = new Set(['hey', 'hi', 'hello', 'ok', 'okay', 'yo'])
-
-  if (tokens[0] === 'nova') {
-    return true
-  }
-
-  if (tokens.length >= 2 && wakePrefixes.has(tokens[0]) && tokens[1] === 'nova') {
-    return true
-  }
-
-  return tokens.length <= 3 && tokens.includes('nova')
-}
-
 export function describeMediaError(error: unknown): string {
   if (error && typeof error === 'object' && 'name' in error) {
     const name = String((error as { name?: unknown }).name || '')

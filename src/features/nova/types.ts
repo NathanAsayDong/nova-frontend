@@ -1,6 +1,14 @@
 export type UiPhase = 'idle' | 'listening' | 'thinking' | 'responding'
 
-export type CapturePurpose = 'none' | 'turn' | 'wake_check'
+// 'sentry' is a turn that opens with the wake phrase: recorded locally until
+// the browser hears "Hey Nova", then sent whole so the request said in the
+// same breath is not lost.
+export type CapturePurpose = 'none' | 'turn' | 'wake_check' | 'sentry'
+
+// How Nova behaves after a reply. 'conversation' keeps listening for
+// follow-ups until a stop phrase; 'sentry' answers one request per wake
+// phrase and goes back to waiting, so it can sit in a room full of people.
+export type VoiceMode = 'conversation' | 'sentry'
 
 export type SpeechRecognitionLike = {
   continuous: boolean
@@ -36,6 +44,8 @@ export type SocketEvent =
   | { type: 'assistant_audio_stream_end'; streamId: string }
   | { type: 'wake_greeting_done'; message: string }
   | { type: 'wake_not_detected'; message: string }
+  // Sentry capture held only the wake phrase; the request comes next.
+  | { type: 'wake_only'; message: string }
   | { type: 'follow_up_stopped'; message: string }
   | { type: 'no_speech'; message: string }
   // A sentence of the WRITTEN answer, for the screen only. Never spoken --

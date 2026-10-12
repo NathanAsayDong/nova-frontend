@@ -66,6 +66,8 @@ function App() {
     setNovaPower,
     needsSoundUnlock,
     enableSound,
+    voiceMode,
+    setVoiceMode,
   } = useNovaRuntime({
     onUserTranscript: addVoiceUserMessage,
     onPartialUserTranscript: updateVoiceDraft,
@@ -160,11 +162,13 @@ function App() {
           uiPhase={uiPhase}
           isStreaming={isStreaming}
           isNovaEnabled={isNovaEnabled}
+          voiceMode={voiceMode}
           isMeetingMode={isMeetingRecording}
           isMeetingBusy={isMeetingBusy}
           isMeetingsPanelOpen={isMeetingsPanelOpen}
           onNewConversation={handleNewConversation}
           onTogglePower={() => setNovaPower(!isNovaEnabled)}
+          onToggleSentry={() => setVoiceMode(voiceMode === 'sentry' ? 'conversation' : 'sentry')}
           onToggleMeeting={handleToggleMeeting}
           onToggleMeetingsPanel={() => {
             setIsStartFormOpen(false)

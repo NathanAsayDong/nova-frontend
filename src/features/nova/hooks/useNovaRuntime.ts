@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ChatStreamEvent } from '../chatTypes'
 import bootupSfx from '../../../assets/bootup.mp3'
-import idleSfx from '../../../assets/idle.mp3'
 import type {
   AudioQueueItem,
   CapturePurpose,
@@ -9,22 +8,63 @@ import type {
   SpeechRecognitionLike,
   StreamAudioBuffer,
   UiPhase,
+  VoiceMode,
 } from '../types'
 import {
   acquireAudioStream,
   base64ToArrayBuffer,
   bestMimeType,
   clearConversationId,
-  containsWakePhrase,
   describeMediaError,
   loadConversationId,
   resolveWsUrls,
   saveConversationId,
 } from '../utils'
+import { containsWakePhrase, startsWithWakePhrase } from '../wakePhrase'
+import { playEarcon, primeEarcons } from '../earcons'
 import { createTurnDetector, type TurnDetector } from '../turnDetector'
 import { SILENT_CLIP_DATA_URI } from '../silentClip'
 import { publishFaceLevel } from '../../face/publisher'
 import { authFetch } from '../../../lib/api'
+
+const voiceModeStorageKey = 'nova.voiceMode'
+
+function loadVoiceMode(): VoiceMode {
+  try {
+    return window.localStorage.getItem(voiceModeStorageKey) === 'sentry' ? 'sentry' : 'conversation'
+  } catch {
+    return 'conversation'
+  }
+}
+
+// Sentry: an utterance that ended before the recognizer reported whether it
+// opened with the wake phrase waits this long for a late result.
+const SENTRY_WAKE_GRACE_MS = 900
+// Sentry: woken with nothing asked. Back to waiting after this much quiet.
+const SENTRY_LISTEN_TIMEOUT_MS = 8000
+const SENTRY_WAITING_MESSAGE = 'Sentry: say "Hey Nova" to ask something.'
+
+/**
+ * One recording, from recorder start to its final flush.
+ *
+ * A sentry capture starts `held`: its chunks stay on this machine until the
+ * wake phrase is heard, because in sentry mode most speech in the room is
+ * not meant for Nova and never leaves the browser. When the wake phrase
+ * arrives the capture is `promoted` -- the start message and the held chunks
+ * go out in order, ahead of anything recorded after.
+ */
+type ActiveCapture = {
+  purpose: Exclude<CapturePurpose, 'none'>
+  recorder: MediaRecorder
+  held: boolean
+  heldChunks: Blob[]
+  promoted: boolean
+  discarded: boolean
+  utteranceEnded: boolean
+  // Every send for this capture is chained here, so chunks keep their order
+  // and the stop message waits for the final flush.
+  delivery: Promise<void>
+}
 
 type UseNovaRuntimeResult = {
   isNovaEnabled: boolean
@@ -48,6 +88,9 @@ type UseNovaRuntimeResult = {
    */
   needsSoundUnlock: boolean
   enableSound: () => void
+  /** 'conversation' keeps listening after a reply; 'sentry' needs the wake phrase every time. */
+  voiceMode: VoiceMode
+  setVoiceMode: (mode: VoiceMode) => void
 }
 
 type NovaRuntimeOptions = {
@@ -90,6 +133,21 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
   const [uiPhase, setUiPhase] = useState<UiPhase>('idle')
   const [assistantText, setAssistantText] = useState('')
   const [needsSoundUnlock, setNeedsSoundUnlock] = useState(false)
+  const [voiceMode, setVoiceModeState] = useState<VoiceMode>(loadVoiceMode)
+  const voiceModeRef = useRef<VoiceMode>(voiceMode)
+  const activeCaptureRef = useRef<ActiveCapture | null>(null)
+  const sentryGraceTimerRef = useRef<number | null>(null)
+  const sentryListenTimerRef = useRef<number | null>(null)
+  // Set by `done` in sentry mode: once the reply has finished playing, go
+  // back to waiting for the wake phrase instead of listening for a follow-up.
+  const pendingSentryReturnRef = useRef(false)
+  // The recognizer keeps revising a phrase after it first matches (interim,
+  // then final). Each phrase may wake Nova once: a late final for "Hey Nova,
+  // …" arriving as the reply starts would otherwise barge in on the answer.
+  const handledWakeResultRef = useRef<{ recognition: SpeechRecognitionLike | null; index: number }>({
+    recognition: null,
+    index: -1,
+  })
 
   const wsRef = useRef<WebSocket | null>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
@@ -160,7 +218,6 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
   const isNovaEnabledRef = useRef(true)
   const isShuttingDownRef = useRef(false)
   const bootupCueAudioRef = useRef<HTMLAudioElement | null>(null)
-  const idleCueAudioRef = useRef<HTMLAudioElement | null>(null)
   const conversationIdRef = useRef<string | null>(loadConversationId())
 
   const wsUrls = useMemo(() => resolveWsUrls(), [])
@@ -208,6 +265,15 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
     setUiPhase('listening')
     setStatusMessage(message)
     resetTurnDetection()
+  }
+
+  // Listening, entered mid-utterance: a sentry wake usually lands while the
+  // user is still talking ("Hey Nova, what's…"), and resetting the detector
+  // there would lose track of the very turn being woken for.
+  const markListening = (message: string) => {
+    uiPhaseRef.current = 'listening'
+    setUiPhase('listening')
+    setStatusMessage(message)
   }
 
   const setThinking = (message: string) => {
@@ -323,19 +389,6 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
     })
   }
 
-  const playIdleCue = () => {
-    if (!idleCueAudioRef.current) {
-      idleCueAudioRef.current = new Audio(idleSfx)
-      idleCueAudioRef.current.preload = 'auto'
-    }
-
-    const cue = idleCueAudioRef.current
-    cue.currentTime = 0
-    void cue.play().catch(() => {
-      // Ignore playback errors from browser autoplay policies.
-    })
-  }
-
   const stopWakeRecognition = () => {
     if (wakeRestartTimerRef.current !== null) {
       window.clearTimeout(wakeRestartTimerRef.current)
@@ -399,6 +452,11 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
     pendingWakeListeningRef.current = false
     pendingFollowUpListeningRef.current = false
     pendingPowerOnListenRef.current = false
+    pendingSentryReturnRef.current = false
+    clearSentryGrace()
+    clearSentryListenTimeout()
+    discardSentryCapture()
+    activeCaptureRef.current = null
     resetTurnDetection()
     audioQueueRef.current = []
     streamBuffersRef.current.forEach((streamBuffer) => {
@@ -446,6 +504,27 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
     return true
   }
 
+  const sendBlob = async (blob: Blob) => {
+    const ws = wsRef.current
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      return
+    }
+    const data = await blob.arrayBuffer()
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(data)
+    }
+  }
+
+  const startMessage = (purpose: Exclude<CapturePurpose, 'none'>) => ({
+    event: 'start',
+    mimeType: recorderMimeTypeRef.current,
+    language: 'en',
+    // Lets the backend skip live-caption passes for wake checks, and strip
+    // the wake phrase from a sentry turn.
+    purpose,
+    ...(conversationIdRef.current ? { conversationId: conversationIdRef.current } : {}),
+  })
+
   const startCapture = (purpose: Exclude<CapturePurpose, 'none'>) => {
     if (captureStartedRef.current) {
       return
@@ -465,17 +544,23 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
       : new MediaRecorder(mediaStreamRef.current)
     recorderMimeTypeRef.current = recorder.mimeType || recorderMimeTypeRef.current
 
-    const started = sendSocketEvent({
-      event: 'start',
-      mimeType: recorderMimeTypeRef.current,
-      language: 'en',
-      // Lets the backend skip live-caption passes for wake checks.
-      purpose,
-      ...(conversationIdRef.current ? { conversationId: conversationIdRef.current } : {}),
-    })
-    if (!started) {
+    // A sentry capture tells the backend nothing until it is promoted.
+    const held = purpose === 'sentry'
+    if (!held && !sendSocketEvent(startMessage(purpose))) {
       return
     }
+
+    const capture: ActiveCapture = {
+      purpose,
+      recorder,
+      held,
+      heldChunks: [],
+      promoted: false,
+      discarded: false,
+      utteranceEnded: false,
+      delivery: Promise.resolve(),
+    }
+    activeCaptureRef.current = capture
 
     captureStartedRef.current = true
     capturePurposeRef.current = purpose
@@ -485,45 +570,49 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
     }
     pendingStopPurposeRef.current = null
 
-    // Chunk delivery is chained through this promise so the stop message can
-    // wait its turn. Two subtleties, both of which lose the END of the user's
-    // last word if ignored:
+    // Chunk delivery is chained so the stop message can wait its turn. Two
+    // subtleties, both of which lose the END of the user's last word if
+    // ignored:
     //  - ondataavailable has to await the Blob before it can send, so a stop
     //    message sent synchronously from onstop OVERTAKES the recorder's
     //    final flush — the backend transcribes a buffer missing the tail.
-    //  - the old "is capture still on?" guard here dropped that same final
-    //    flush outright, because stopCapture clears the flag before the
-    //    recorder emits it. The backend already ignores chunks outside a
-    //    recording, so no client-side gate is needed at all.
-    let lastChunkDelivery: Promise<void> = Promise.resolve()
-
+    //  - an "is capture still on?" guard here would drop that same final
+    //    flush, because stopCapture clears the flag before the recorder
+    //    emits it. The backend already ignores chunks outside a recording,
+    //    so no client-side gate is needed.
+    // Whether a chunk is held is decided when its turn in the chain comes,
+    // not when it arrives, so held chunks always go out before later ones.
     recorder.ondataavailable = (event: BlobEvent) => {
       if (!event.data || event.data.size === 0) {
         return
       }
-
-      const delivery = (async () => {
-        const wsCurrent = wsRef.current
-        if (!wsCurrent || wsCurrent.readyState !== WebSocket.OPEN) {
-          return
-        }
-        const data = await event.data.arrayBuffer()
-        if (wsCurrent.readyState === WebSocket.OPEN) {
-          wsCurrent.send(data)
-        }
-      })()
-      lastChunkDelivery = delivery.catch(() => {
-        // A failed chunk send must not also swallow the stop message.
-      })
+      const blob = event.data
+      capture.delivery = capture.delivery
+        .then(async () => {
+          if (capture.discarded) {
+            return
+          }
+          if (capture.held) {
+            capture.heldChunks.push(blob)
+            return
+          }
+          await sendBlob(blob)
+        })
+        .catch(() => {
+          // A failed chunk send must not also swallow the stop message.
+        })
     }
 
     recorder.onstop = () => {
       const stopPurpose = pendingStopPurposeRef.current
       pendingStopPurposeRef.current = null
-      if (!stopPurpose) {
+      if (activeCaptureRef.current === capture) {
+        activeCaptureRef.current = null
+      }
+      if (!stopPurpose || capture.discarded) {
         return
       }
-      void lastChunkDelivery.then(() => {
+      void capture.delivery.then(() => {
         sendSocketEvent({
           event: 'stop',
           purpose: stopPurpose,
@@ -534,6 +623,58 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
 
     recorder.start(450)
     mediaRecorderRef.current = recorder
+  }
+
+  /** Send a held sentry capture: the start message, then everything recorded so far. */
+  const promoteSentryCapture = (capture: ActiveCapture) => {
+    if (!capture.held || capture.promoted || capture.discarded) {
+      return
+    }
+    capture.promoted = true
+    suppressAssistantAudioUntilNextTurnRef.current = false
+    resetAssistantTurnContent()
+    capture.delivery = capture.delivery
+      .then(async () => {
+        sendSocketEvent(startMessage('sentry'))
+        for (const blob of capture.heldChunks) {
+          await sendBlob(blob)
+        }
+        capture.heldChunks = []
+        capture.held = false
+      })
+      .catch(() => {})
+  }
+
+  const clearSentryGrace = () => {
+    if (sentryGraceTimerRef.current !== null) {
+      window.clearTimeout(sentryGraceTimerRef.current)
+      sentryGraceTimerRef.current = null
+    }
+  }
+
+  const clearSentryListenTimeout = () => {
+    if (sentryListenTimerRef.current !== null) {
+      window.clearTimeout(sentryListenTimerRef.current)
+      sentryListenTimerRef.current = null
+    }
+  }
+
+  /** Drop a sentry capture that was never woken. Nothing was sent, so nothing to tell the backend. */
+  const discardSentryCapture = () => {
+    clearSentryGrace()
+    const capture = activeCaptureRef.current
+    if (!capture || capture.purpose !== 'sentry' || capture.promoted) {
+      return
+    }
+    capture.discarded = true
+    capture.heldChunks = []
+    activeCaptureRef.current = null
+    captureStartedRef.current = false
+    capturePurposeRef.current = 'none'
+    pendingStopPurposeRef.current = null
+    if (capture.recorder.state !== 'inactive') {
+      capture.recorder.stop()
+    }
   }
 
   const stopCapture = (purpose: Exclude<CapturePurpose, 'none'>) => {
@@ -564,7 +705,8 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
   // recorder's onstop sends nothing; the explicit abort tells the backend to
   // drop the buffered noise instead of merging it into the next real turn.
   const abortCapture = () => {
-    if (!captureStartedRef.current || capturePurposeRef.current !== 'turn') {
+    const purpose = capturePurposeRef.current
+    if (!captureStartedRef.current || (purpose !== 'turn' && purpose !== 'sentry')) {
       return
     }
 
@@ -605,6 +747,7 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
    * tap, the "Enable sound" button, and the first tap anywhere on the page.
    */
   const unlockAudio = () => {
+    primeEarcons()
     if (audioUnlockedRef.current) {
       return
     }
@@ -884,6 +1027,13 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
   }
 
   const maybeFinalizeListeningTransitions = () => {
+    if (pendingSentryReturnRef.current) {
+      pendingSentryReturnRef.current = false
+      pendingFollowUpListeningRef.current = false
+      returnToSentryWaiting('done')
+      return
+    }
+
     if (pendingWakeListeningRef.current) {
       pendingWakeListeningRef.current = false
       setListening('Hi, I\'m listening.')
@@ -931,14 +1081,60 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
     }
   }
 
+  const returnToSentryWaiting = (cue: 'done' | 'cancel') => {
+    clearSentryListenTimeout()
+    playEarcon(cue)
+    setIdle(SENTRY_WAITING_MESSAGE)
+  }
+
+  /** Woken in sentry mode with nothing asked yet: wait a while, then stand down. */
+  const armSentryListenTimeout = () => {
+    clearSentryListenTimeout()
+    if (voiceModeRef.current !== 'sentry') {
+      return
+    }
+    sentryListenTimerRef.current = window.setTimeout(() => {
+      sentryListenTimerRef.current = null
+      if (
+        voiceModeRef.current === 'sentry' &&
+        uiPhaseRef.current === 'listening' &&
+        !captureStartedRef.current
+      ) {
+        returnToSentryWaiting('cancel')
+      }
+    }, SENTRY_LISTEN_TIMEOUT_MS)
+  }
+
+  // Conversation mode's wake: a chime and straight to listening. It used to
+  // speak "Hello sir" first, which cost a TTS round trip before the user
+  // could say anything.
   const triggerWakeGreeting = () => {
     if (uiPhaseRef.current !== 'idle') {
       return
     }
+    playEarcon('wake')
+    setListening("I'm listening.")
+  }
 
-    setThinking('Wake phrase detected. Saying hello...')
-    pendingWakeListeningRef.current = true
-    sendSocketEvent({ event: 'wake_greeting' })
+  const handleSentryWake = () => {
+    const capture = activeCaptureRef.current
+    playEarcon('wake')
+    if (capture && capture.purpose === 'sentry' && !capture.promoted && !capture.discarded) {
+      clearSentryGrace()
+      promoteSentryCapture(capture)
+      markListening("I'm listening.")
+      // The utterance already ended ("Hey Nova." and a pause) before the
+      // recognizer caught up: send it now rather than waiting on silence.
+      if (capture.utteranceEnded) {
+        stopCapture('sentry')
+        setThinking('Transcribing and generating response...')
+      }
+      return
+    }
+    // The recognizer heard it but no recording was running (the voice
+    // detector missed the start): treat it as a bare wake and listen.
+    setListening("I'm listening.")
+    armSentryListenTimeout()
   }
 
   const triggerWakeBargeIn = () => {
@@ -946,9 +1142,11 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
       return
     }
 
+    playEarcon('wake')
     suppressAssistantAudioUntilNextTurnRef.current = true
     pendingWakeListeningRef.current = false
     pendingFollowUpListeningRef.current = false
+    pendingSentryReturnRef.current = false
     audioQueueRef.current = []
     streamBuffersRef.current.forEach((streamBuffer) => {
       streamBuffer.ended = true
@@ -957,6 +1155,7 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
     streamBuffersRef.current.clear()
     stopActiveAgentAudioPlayback()
     setListening("I'm listening.")
+    armSentryListenTimeout()
   }
 
   const maybeStartWakeRecognition = () => {
@@ -984,12 +1183,28 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
     recognition.lang = 'en-US'
 
     recognition.onresult = (event) => {
-      let transcript = ''
-      for (let i = event.resultIndex; i < event.results.length; i += 1) {
-        transcript += ` ${event.results[i][0].transcript}`
+      const sentry = voiceModeRef.current === 'sentry'
+      let woke = false
+      if (sentry) {
+        // Each result is one phrase; the wake phrase has to open one.
+        const handled = handledWakeResultRef.current
+        const lastHandled = handled.recognition === recognition ? handled.index : -1
+        for (let i = Math.max(event.resultIndex, lastHandled + 1); i < event.results.length; i += 1) {
+          if (startsWithWakePhrase(event.results[i][0].transcript)) {
+            handledWakeResultRef.current = { recognition, index: i }
+            woke = true
+            break
+          }
+        }
+      } else {
+        let transcript = ''
+        for (let i = event.resultIndex; i < event.results.length; i += 1) {
+          transcript += ` ${event.results[i][0].transcript}`
+        }
+        woke = containsWakePhrase(transcript)
       }
 
-      if (!containsWakePhrase(transcript)) {
+      if (!woke) {
         return
       }
 
@@ -999,7 +1214,11 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
       }
 
       if (uiPhaseRef.current === 'idle') {
-        triggerWakeGreeting()
+        if (sentry) {
+          handleSentryWake()
+        } else {
+          triggerWakeGreeting()
+        }
       }
     }
 
@@ -1056,14 +1275,15 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
       if (pendingPowerOnListenRef.current) {
         pendingPowerOnListenRef.current = false
         setListening("I'm listening.")
+        armSentryListenTimeout()
         return
       }
-      setIdle('Idle.')
+      setIdle(voiceModeRef.current === 'sentry' ? SENTRY_WAITING_MESSAGE : 'Idle.')
       return
     }
 
     if (payload.type === 'listening') {
-      if (capturePurposeRef.current === 'turn') {
+      if (capturePurposeRef.current === 'turn' || capturePurposeRef.current === 'sentry') {
         setStatusMessage(payload.message)
         // Starting window, until the first caption gives the backend's scorer
         // something to read.
@@ -1138,23 +1358,36 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
       return
     }
 
+    if (payload.type === 'wake_only') {
+      // "Hey Nova" on its own: the chime already played, now take the request.
+      optionsRef.current.onPartialUserTranscript?.('')
+      setListening("I'm listening.")
+      armSentryListenTimeout()
+      return
+    }
+
     if (payload.type === 'follow_up_stopped') {
       // Stop phrase spoken — no user_transcript follows, drop the caption.
       optionsRef.current.onPartialUserTranscript?.('')
-      playIdleCue()
-      setIdle(payload.message)
+      clearSentryListenTimeout()
+      playEarcon('done')
+      setIdle(voiceModeRef.current === 'sentry' ? SENTRY_WAITING_MESSAGE : payload.message)
       return
     }
 
     if (payload.type === 'no_speech') {
       optionsRef.current.onPartialUserTranscript?.('')
+      if (voiceModeRef.current === 'sentry') {
+        returnToSentryWaiting('cancel')
+        return
+      }
       setListening('Still listening...')
       return
     }
 
     if (payload.type === 'partial_transcript') {
       // Live caption of an in-progress recording; only meaningful mid-turn.
-      if (capturePurposeRef.current === 'turn') {
+      if (capturePurposeRef.current === 'turn' || capturePurposeRef.current === 'sentry') {
         optionsRef.current.onPartialUserTranscript?.(payload.text)
         // The caption also carries how long silence should now have to last
         // before the turn is called over: short once the sentence resolves,
@@ -1239,7 +1472,13 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
       // Deliberately not setAssistantText: `assistantText` on the done event
       // is the written answer, and this state tracks what was spoken. The
       // speech_text events already filled it in.
-      pendingFollowUpListeningRef.current = true
+      // Conversation mode listens for a follow-up; sentry goes back to
+      // waiting for the wake phrase. Either way, after the reply has played.
+      if (voiceModeRef.current === 'sentry') {
+        pendingSentryReturnRef.current = true
+      } else {
+        pendingFollowUpListeningRef.current = true
+      }
       setStatusMessage(payload.message)
       if (!isAudioQueueRunningRef.current && audioQueueRef.current.length === 0) {
         maybeFinalizeListeningTransitions()
@@ -1527,11 +1766,38 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
   // otherwise close over the first render's copies of these functions. Every
   // handler is guarded on the phase: the detector keeps running whenever the
   // microphone is open, but only a listening runtime should act on it.
+  // Sentry is waiting for the wake phrase: every utterance is recorded
+  // locally, just in case it opens with "Hey Nova".
+  const isSentryWaiting = () =>
+    voiceModeRef.current === 'sentry' &&
+    uiPhaseRef.current === 'idle' &&
+    isNovaEnabledRef.current &&
+    wsRef.current?.readyState === WebSocket.OPEN
+
+  // A capture the backend is receiving: a turn, or a sentry capture that has
+  // been woken. A held sentry capture has not told the backend anything.
+  const isLiveTurnCapture = () => {
+    if (!captureStartedRef.current) {
+      return false
+    }
+    if (capturePurposeRef.current === 'turn') {
+      return true
+    }
+    return capturePurposeRef.current === 'sentry' && Boolean(activeCaptureRef.current?.promoted)
+  }
+
   turnHandlersRef.current = {
     onSpeechOnset: () => {
+      if (isSentryWaiting()) {
+        if (!captureStartedRef.current) {
+          startCapture('sentry')
+        }
+        return
+      }
       if (uiPhaseRef.current !== 'listening') {
         return
       }
+      clearSentryListenTimeout()
       // Start the recorder at the first sign of speech rather than after the
       // onset hold confirms it — confirmation costs 120ms, and a recorder
       // started then has already missed the first syllable. If the onset
@@ -1541,9 +1807,16 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
       }
     },
     onSpeechStart: () => {
+      if (isSentryWaiting()) {
+        if (!captureStartedRef.current) {
+          startCapture('sentry')
+        }
+        return
+      }
       if (uiPhaseRef.current !== 'listening') {
         return
       }
+      clearSentryListenTimeout()
       // Capture normally began at onset; this is the backstop for the edge
       // where onset fired outside 'listening' and the phase changed since.
       if (!captureStartedRef.current) {
@@ -1551,13 +1824,22 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
       }
     },
     onSpeechAbort: () => {
+      const capture = activeCaptureRef.current
+      if (capture?.purpose === 'sentry' && !capture.promoted) {
+        discardSentryCapture()
+        return
+      }
       abortCapture()
+      // A click while woken: keep waiting for the request, but not forever.
+      if (uiPhaseRef.current === 'listening') {
+        armSentryListenTimeout()
+      }
     },
     onSpeechPause: () => {
       if (uiPhaseRef.current !== 'listening') {
         return
       }
-      if (captureStartedRef.current && capturePurposeRef.current === 'turn') {
+      if (isLiveTurnCapture()) {
         // Flush the recorder first: the audio holding the last words is
         // still in its internal buffer, and the backend is about to
         // transcribe. The flushed chunk is what tells it the buffer is
@@ -1577,20 +1859,65 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
       if (uiPhaseRef.current !== 'listening') {
         return
       }
-      if (captureStartedRef.current && capturePurposeRef.current === 'turn') {
+      if (isLiveTurnCapture()) {
         sendSocketEvent({ event: 'speech_resume' })
       }
     },
     onTurnEnd: () => {
+      const capture = activeCaptureRef.current
+      if (capture?.purpose === 'sentry' && !capture.promoted) {
+        // Over before the recognizer said whether it opened with "Nova":
+        // give a late result a moment, then forget the utterance.
+        capture.utteranceEnded = true
+        clearSentryGrace()
+        sentryGraceTimerRef.current = window.setTimeout(() => {
+          sentryGraceTimerRef.current = null
+          discardSentryCapture()
+        }, SENTRY_WAKE_GRACE_MS)
+        return
+      }
       if (uiPhaseRef.current !== 'listening') {
         return
       }
-      if (!captureStartedRef.current || capturePurposeRef.current !== 'turn') {
+      if (!isLiveTurnCapture()) {
         return
       }
-      stopCapture('turn')
+      stopCapture(capturePurposeRef.current === 'sentry' ? 'sentry' : 'turn')
       setThinking('Transcribing and generating response...')
     },
+  }
+
+  const setVoiceMode = (mode: VoiceMode) => {
+    if (mode === voiceModeRef.current) {
+      return
+    }
+    voiceModeRef.current = mode
+    setVoiceModeState(mode)
+    try {
+      window.localStorage.setItem(voiceModeStorageKey, mode)
+    } catch {
+      // Not persisted; the mode still applies until reload.
+    }
+    // A tap: unlock audio so the first chime is not blocked.
+    unlockAudio()
+
+    if (mode === 'sentry') {
+      // Waiting for follow-ups is exactly what sentry does not do. Mid-turn,
+      // `done` will route back to waiting once the reply ends.
+      if (uiPhaseRef.current === 'listening' && !captureStartedRef.current) {
+        returnToSentryWaiting('done')
+      } else if (uiPhaseRef.current === 'idle') {
+        setStatusMessage(SENTRY_WAITING_MESSAGE)
+      }
+      return
+    }
+
+    clearSentryListenTimeout()
+    discardSentryCapture()
+    if (pendingSentryReturnRef.current) {
+      pendingSentryReturnRef.current = false
+      pendingFollowUpListeningRef.current = true
+    }
   }
 
   useEffect(() => {
@@ -1662,11 +1989,6 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
         bootupCueAudioRef.current.src = ''
         bootupCueAudioRef.current = null
       }
-      if (idleCueAudioRef.current) {
-        idleCueAudioRef.current.pause()
-        idleCueAudioRef.current.src = ''
-        idleCueAudioRef.current = null
-      }
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1682,5 +2004,7 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
     setNovaPower,
     needsSoundUnlock,
     enableSound: unlockAudio,
+    voiceMode,
+    setVoiceMode,
   }
 }

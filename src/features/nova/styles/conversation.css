@@ -40,6 +40,26 @@
   gap: 12px;
 }
 
+/* Sentry is a mode, not a recording: it takes the header's green "on" state
+   rather than the warm colour reserved for a meeting in progress. Qualified
+   with .meetingToggle because meetings.css loads later. */
+.meetingToggle.sentryToggle.active {
+  border-color: var(--green);
+  background: var(--green-soft);
+  color: var(--green-ink);
+}
+
+.meetingToggle.sentryToggle.active:hover:not(:disabled) {
+  background: var(--paper);
+}
+
+.sentryDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--green);
+}
+
 .novaMark {
   font-size: 1.1rem;
   font-weight: 800;
