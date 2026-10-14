@@ -19,6 +19,8 @@ type ConversationHeaderProps = {
   isNovaEnabled: boolean
   /** Sentry answers one request per wake phrase instead of holding a conversation. */
   voiceMode: VoiceMode
+  /** The voice socket to the tower is open. */
+  isConnected: boolean
   /** A meeting is recording, so Nova is transcribing rather than listening. */
   isMeetingMode: boolean
   /** Blocks the toggle while a meeting is starting or being written up. */
@@ -48,6 +50,7 @@ export function ConversationHeader({
   isStreaming,
   isNovaEnabled,
   voiceMode,
+  isConnected,
   isMeetingMode,
   isMeetingBusy,
   isMeetingsPanelOpen,
@@ -69,7 +72,12 @@ export function ConversationHeader({
   const phase: UiPhase = isStreaming && uiPhase === 'idle' ? 'thinking' : uiPhase
   const isSentry = voiceMode === 'sentry'
   // Idle in sentry is not idle: it is waiting for "Hey Nova".
-  const phaseLabel = isSentry && phase === 'idle' ? 'Sentry' : PHASE_LABEL[phase]
+  // A dropped socket used to look exactly like a healthy idle Nova.
+  const phaseLabel = !isConnected
+    ? 'Reconnecting'
+    : isSentry && phase === 'idle'
+      ? 'Sentry'
+      : PHASE_LABEL[phase]
 
   return (
     <header className="novaHeader">

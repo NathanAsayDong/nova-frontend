@@ -54,6 +54,14 @@ const PREROLL_MS = 500
 // Slack on top of the pre-roll for the recorder's own buffering.
 const PREROLL_SLACK_MS = 60
 
+// Reconnect backoff after the socket to the tower drops (laptop sleep, Wi-Fi
+// change, or the API restarting — which it does on every `git pull` on the
+// tower). Before, a dropped socket stayed dropped until a page refresh, and
+// Sentry kept chiming on "Hey Nova" with nowhere to send the request.
+const RECONNECT_DELAYS_MS = [1000, 2000, 5000, 10000, 30000]
+// A woken request waits this long for the socket to come back before giving up.
+const SOCKET_WAIT_MS = 8000
+
 /**
  * One recording, from recorder start to its final flush.
  *
@@ -104,6 +112,8 @@ type UseNovaRuntimeResult = {
   /** 'conversation' keeps listening after a reply; 'sentry' needs the wake phrase every time. */
   voiceMode: VoiceMode
   setVoiceMode: (mode: VoiceMode) => void
+  /** The socket to the tower is open. False while (re)connecting. */
+  isConnected: boolean
 }
 
 type NovaRuntimeOptions = {
@@ -154,6 +164,12 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
   // Set by `done` in sentry mode: once the reply has finished playing, go
   // back to waiting for the wake phrase instead of listening for a follow-up.
   const pendingSentryReturnRef = useRef(false)
+  const [isConnected, setIsConnected] = useState(false)
+  const reconnectTimerRef = useRef<number | null>(null)
+  const reconnectAttemptRef = useRef(0)
+  const isConnectingRef = useRef(false)
+  // Captures waiting for the socket to come back, resolved when it opens.
+  const socketWaitersRef = useRef<Array<() => void>>([])
   // The recognizer keeps revising a phrase after it first matches (interim,
   // then final). Each phrase may wake Nova once: a late final for "Hey Nova,
   // …" arriving as the reply starts would otherwise barge in on the answer.
@@ -497,6 +513,12 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
     pendingFollowUpListeningRef.current = false
     pendingPowerOnListenRef.current = false
     pendingSentryReturnRef.current = false
+    if (reconnectTimerRef.current !== null) {
+      window.clearTimeout(reconnectTimerRef.current)
+      reconnectTimerRef.current = null
+    }
+    reconnectAttemptRef.current = 0
+    setIsConnected(false)
     clearSentryGrace()
     clearSentryListenTimeout()
     discardSentryCapture()
@@ -594,11 +616,10 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
       : new MediaRecorder(recordStream)
     recorderMimeTypeRef.current = recorder.mimeType || recorderMimeTypeRef.current
 
-    // A sentry capture tells the backend nothing until it is promoted.
-    const held = purpose === 'sentry'
-    if (!held && !sendSocketEvent(startMessage(purpose))) {
-      return
-    }
+    // A sentry capture tells the backend nothing until it is promoted. Any
+    // other capture is held too while the socket is down, and goes out as
+    // soon as it is back, rather than the turn failing silently.
+    const held = purpose === 'sentry' || !sendSocketEvent(startMessage(purpose))
 
     const capture: ActiveCapture = {
       purpose,
@@ -664,6 +685,10 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
         return
       }
       void capture.delivery.then(() => {
+        // Gave up waiting for the socket after this stop was queued.
+        if (capture.discarded) {
+          return
+        }
         sendSocketEvent({
           event: 'stop',
           purpose: stopPurpose,
@@ -674,10 +699,21 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
 
     recorder.start(450)
     mediaRecorderRef.current = recorder
+
+    if (held && purpose !== 'sentry') {
+      promoteCapture(capture)
+    }
   }
 
-  /** Send a held sentry capture: the start message, then everything recorded so far. */
-  const promoteSentryCapture = (capture: ActiveCapture) => {
+  /**
+   * Send a held capture: the start message, then everything recorded so far.
+   *
+   * Waits for the socket first. A request spoken while it was down (the
+   * laptop just woke, the tower's API just restarted) goes out once it
+   * reconnects instead of being dropped; if it does not come back in time,
+   * say so with the cancel tone rather than listening into nothing.
+   */
+  const promoteCapture = (capture: ActiveCapture) => {
     if (!capture.held || capture.promoted || capture.discarded) {
       return
     }
@@ -686,7 +722,15 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
     resetAssistantTurnContent()
     capture.delivery = capture.delivery
       .then(async () => {
-        sendSocketEvent(startMessage('sentry'))
+        const open = await waitForOpenSocket(SOCKET_WAIT_MS)
+        if (capture.discarded) {
+          return
+        }
+        if (!open) {
+          abandonCapture(capture)
+          return
+        }
+        sendSocketEvent(startMessage(capture.purpose))
         for (const blob of capture.heldChunks) {
           await sendBlob(blob)
         }
@@ -694,6 +738,28 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
         capture.held = false
       })
       .catch(() => {})
+  }
+
+  /** The socket never came back for this capture: drop it and stand down audibly. */
+  const abandonCapture = (capture: ActiveCapture) => {
+    capture.discarded = true
+    capture.heldChunks = []
+    if (activeCaptureRef.current === capture) {
+      activeCaptureRef.current = null
+      captureStartedRef.current = false
+      capturePurposeRef.current = 'none'
+      pendingStopPurposeRef.current = null
+    }
+    if (capture.recorder.state !== 'inactive') {
+      capture.recorder.stop()
+    }
+    optionsRef.current.onPartialUserTranscript?.('')
+    playEarcon('cancel')
+    setIdle(
+      voiceModeRef.current === 'sentry'
+        ? SENTRY_WAITING_MESSAGE
+        : "Couldn't reach Nova. Reconnecting...",
+    )
   }
 
   const clearSentryGrace = () => {
@@ -764,6 +830,12 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
     captureStartedRef.current = false
     capturePurposeRef.current = 'none'
     pendingStopPurposeRef.current = null
+    const capture = activeCaptureRef.current
+    if (capture) {
+      // Still waiting on the socket: make sure it is never sent.
+      capture.discarded = capture.held
+      activeCaptureRef.current = null
+    }
 
     const recorder = mediaRecorderRef.current
     if (recorder && recorder.state !== 'inactive') {
@@ -1172,7 +1244,7 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
     playEarcon('wake')
     if (capture && capture.purpose === 'sentry' && !capture.promoted && !capture.discarded) {
       clearSentryGrace()
-      promoteSentryCapture(capture)
+      promoteCapture(capture)
       markListening("I'm listening.")
       // The utterance already ended ("Hey Nova." and a pause) before the
       // recognizer caught up: send it now rather than waiting on silence.
@@ -1186,6 +1258,9 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
     // detector missed the start): treat it as a bare wake and listen.
     setListening("I'm listening.")
     armSentryListenTimeout()
+    if (!wsRef.current) {
+      void reconnectSocket()
+    }
   }
 
   const triggerWakeBargeIn = () => {
@@ -1329,7 +1404,10 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
         armSentryListenTimeout()
         return
       }
-      setIdle(voiceModeRef.current === 'sentry' ? SENTRY_WAITING_MESSAGE : 'Idle.')
+      // On a reconnect a request may be waiting on this socket; leave it be.
+      if (uiPhaseRef.current === 'idle') {
+        setIdle(voiceModeRef.current === 'sentry' ? SENTRY_WAITING_MESSAGE : 'Idle.')
+      }
       return
     }
 
@@ -1680,6 +1758,195 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
       })
   }
 
+  const openSocket = async (): Promise<WebSocket> => {
+    let lastConnectError = 'Unknown connection error.'
+    for (const url of wsUrls) {
+      try {
+        return await new Promise<WebSocket>((resolve, reject) => {
+          const candidate = new WebSocket(url)
+          const timeout = window.setTimeout(() => {
+            candidate.close()
+            reject(new Error(`Timed out connecting to ${url}`))
+          }, 6000)
+
+          candidate.onopen = () => {
+            window.clearTimeout(timeout)
+            resolve(candidate)
+          }
+          candidate.onerror = () => {
+            window.clearTimeout(timeout)
+            reject(new Error(`WebSocket error for ${url}`))
+          }
+        })
+      } catch (error) {
+        lastConnectError = error instanceof Error ? error.message : String(error)
+      }
+    }
+    throw new Error(`Unable to connect to backend websocket. ${lastConnectError}`)
+  }
+
+  const attachSocket = (ws: WebSocket) => {
+    wsRef.current = ws
+    reconnectAttemptRef.current = 0
+    setIsConnected(true)
+
+    ws.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data) as SocketEvent
+        handleSocketEvent(payload)
+      } catch {
+        setStatusMessage('Received non-JSON message from backend.')
+      }
+    }
+
+    ws.onerror = () => {
+      // onclose always follows; reconnecting is handled there.
+    }
+
+    ws.onclose = () => handleSocketClosed(ws)
+
+    // Anything that was waiting for a socket (a request spoken while it was
+    // down) can go now.
+    const waiters = socketWaitersRef.current.splice(0)
+    waiters.forEach((resolve) => resolve())
+  }
+
+  const handleSocketClosed = (ws: WebSocket) => {
+    if (wsRef.current !== ws) {
+      return
+    }
+    streamBuffersRef.current.forEach((streamBuffer) => {
+      streamBuffer.ended = true
+      notifyStreamWaiters(streamBuffer)
+    })
+    wsRef.current = null
+    setIsConnected(false)
+
+    // A turn the backend was receiving is gone with its connection. A held
+    // capture (a sentry utterance still on this machine) is unaffected.
+    const capture = activeCaptureRef.current
+    if (capture && !capture.held) {
+      capture.discarded = true
+      activeCaptureRef.current = null
+      captureStartedRef.current = false
+      capturePurposeRef.current = 'none'
+      pendingStopPurposeRef.current = null
+      if (capture.recorder.state !== 'inactive') {
+        capture.recorder.stop()
+      }
+    }
+
+    if (!isNovaEnabledRef.current || isShuttingDownRef.current) {
+      return
+    }
+    if (uiPhaseRef.current === 'thinking' || uiPhaseRef.current === 'responding') {
+      playEarcon('cancel')
+      setIdle(voiceModeRef.current === 'sentry' ? SENTRY_WAITING_MESSAGE : 'Reconnecting...')
+    }
+    scheduleReconnect()
+  }
+
+  const scheduleReconnect = () => {
+    if (reconnectTimerRef.current !== null) {
+      return
+    }
+    const attempt = reconnectAttemptRef.current
+    const delay = RECONNECT_DELAYS_MS[Math.min(attempt, RECONNECT_DELAYS_MS.length - 1)]
+    reconnectAttemptRef.current = attempt + 1
+    reconnectTimerRef.current = window.setTimeout(() => {
+      reconnectTimerRef.current = null
+      void reconnectSocket()
+    }, delay)
+  }
+
+  /** Re-open the socket now (not after the backoff), keeping the microphone as it is. */
+  const reconnectSocket = async () => {
+    if (reconnectTimerRef.current !== null) {
+      window.clearTimeout(reconnectTimerRef.current)
+      reconnectTimerRef.current = null
+    }
+    if (
+      !isNovaEnabledRef.current ||
+      isShuttingDownRef.current ||
+      isConnectingRef.current ||
+      wsRef.current
+    ) {
+      return
+    }
+    if (!mediaStreamRef.current) {
+      // Never got as far as the microphone: start from the top.
+      void initializeRuntime()
+      return
+    }
+    isConnectingRef.current = true
+    try {
+      const ws = await openSocket()
+      if (!isNovaEnabledRef.current || isShuttingDownRef.current) {
+        ws.close()
+        return
+      }
+      attachSocket(ws)
+    } catch {
+      scheduleReconnect()
+    } finally {
+      isConnectingRef.current = false
+    }
+  }
+
+  /** Resolve true once the socket is open (reconnecting now if needed), false after `timeoutMs`. */
+  const waitForOpenSocket = (timeoutMs: number) =>
+    new Promise<boolean>((resolve) => {
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        resolve(true)
+        return
+      }
+      const waiter = () => {
+        window.clearTimeout(timer)
+        resolve(true)
+      }
+      const timer = window.setTimeout(() => {
+        socketWaitersRef.current = socketWaitersRef.current.filter((w) => w !== waiter)
+        resolve(false)
+      }, timeoutMs)
+      socketWaitersRef.current.push(waiter)
+      void reconnectSocket()
+    })
+
+  // The microphone's track ends when the Mac sleeps or the input device
+  // changes. Chrome's speech recognizer reopens the mic on its own, so the
+  // wake chime would keep working while the recorder and detector listened
+  // to a dead stream. Reopen it the same way.
+  const watchMicTrack = (stream: MediaStream) => {
+    stream.getAudioTracks().forEach((track) => {
+      track.addEventListener('ended', () => {
+        if (mediaStreamRef.current !== stream) {
+          return
+        }
+        void restartMicrophone()
+      })
+    })
+  }
+
+  const restartMicrophone = async () => {
+    if (!isNovaEnabledRef.current || isShuttingDownRef.current) {
+      return
+    }
+    discardSentryCapture()
+    try {
+      const stream = await acquireAudioStream()
+      if (!isNovaEnabledRef.current || isShuttingDownRef.current) {
+        stream.getTracks().forEach((track) => track.stop())
+        return
+      }
+      mediaStreamRef.current?.getTracks().forEach((track) => track.stop())
+      mediaStreamRef.current = stream
+      startAudioAnalysis(stream)
+      watchMicTrack(stream)
+    } catch {
+      window.setTimeout(() => void restartMicrophone(), 5000)
+    }
+  }
+
   const initializeRuntime = async () => {
     if (!isNovaEnabledRef.current) {
       return
@@ -1706,74 +1973,16 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
       recorderMimeTypeRef.current = mimeType ?? 'audio/webm'
 
       setStatusMessage('Connecting to Nova backend...')
-      let ws: WebSocket | null = null
-      let lastConnectError = 'Unknown connection error.'
-
-      for (const url of wsUrls) {
-        try {
-          ws = await new Promise<WebSocket>((resolve, reject) => {
-            const candidate = new WebSocket(url)
-            const timeout = window.setTimeout(() => {
-              candidate.close()
-              reject(new Error(`Timed out connecting to ${url}`))
-            }, 6000)
-
-            candidate.onopen = () => {
-              window.clearTimeout(timeout)
-              resolve(candidate)
-            }
-            candidate.onerror = () => {
-              window.clearTimeout(timeout)
-              reject(new Error(`WebSocket error for ${url}`))
-            }
-          })
-          break
-        } catch (error) {
-          lastConnectError = error instanceof Error ? error.message : String(error)
-        }
-      }
-
-      if (!ws) {
-        throw new Error(`Unable to connect to backend websocket. ${lastConnectError}`)
-      }
+      const ws = await openSocket()
       if (!isNovaEnabledRef.current) {
         ws.close()
         return
       }
 
-      wsRef.current = ws
-      setIdle('Idle.')
+      attachSocket(ws)
+      setIdle(voiceModeRef.current === 'sentry' ? SENTRY_WAITING_MESSAGE : 'Idle.')
       maybeStartWakeRecognition()
-
-      ws.onmessage = (event) => {
-        try {
-          const payload = JSON.parse(event.data) as SocketEvent
-          handleSocketEvent(payload)
-        } catch {
-          setStatusMessage('Received non-JSON message from backend.')
-        }
-      }
-
-      ws.onerror = () => {
-        if (!isNovaEnabledRef.current || isShuttingDownRef.current) {
-          return
-        }
-        setThinking('WebSocket connection error.')
-      }
-
-      ws.onclose = () => {
-        streamBuffersRef.current.forEach((streamBuffer) => {
-          streamBuffer.ended = true
-          notifyStreamWaiters(streamBuffer)
-        })
-        wsRef.current = null
-        captureStartedRef.current = false
-        capturePurposeRef.current = 'none'
-        if (!isNovaEnabledRef.current || isShuttingDownRef.current) {
-          return
-        }
-        setIdle('Connection closed. Waiting to reconnect on refresh.')
-      }
+      watchMicTrack(stream)
 
       mediaRecorderRef.current = null
     } catch (error) {
@@ -1862,11 +2071,13 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
   // microphone is open, but only a listening runtime should act on it.
   // Sentry is waiting for the wake phrase: every utterance is recorded
   // locally, just in case it opens with "Hey Nova".
+  // Does not need the socket: the utterance is only recorded locally, and if
+  // it turns out to be a wake the promotion waits for the socket to return.
   const isSentryWaiting = () =>
     voiceModeRef.current === 'sentry' &&
     uiPhaseRef.current === 'idle' &&
     isNovaEnabledRef.current &&
-    wsRef.current?.readyState === WebSocket.OPEN
+    Boolean(mediaStreamRef.current)
 
   // A capture the backend is receiving: a turn, or a sentry capture that has
   // been woken. A held sentry capture has not told the backend anything.
@@ -2090,6 +2301,18 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
 
     navigator.mediaDevices?.addEventListener?.('devicechange', handleDeviceChange)
 
+    // Back from sleep or a network change: reconnect now rather than at the
+    // next backoff step, so the first "Hey Nova" after it finds a socket.
+    const reconnectIfDown = () => {
+      if (document.visibilityState === 'visible' || navigator.onLine) {
+        if (!wsRef.current) {
+          void reconnectSocket()
+        }
+      }
+    }
+    window.addEventListener('online', reconnectIfDown)
+    document.addEventListener('visibilitychange', reconnectIfDown)
+
     // Nova boots without a tap on page load, so the power button is not
     // guaranteed to be pressed before the first reply. Any first tap or key
     // on the page unlocks audio instead. Cheap: a no-op once unlocked.
@@ -2103,6 +2326,12 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
       cancelled = true
       gestureEvents.forEach((name) => document.removeEventListener(name, handleFirstGesture))
       navigator.mediaDevices?.removeEventListener?.('devicechange', handleDeviceChange)
+      window.removeEventListener('online', reconnectIfDown)
+      document.removeEventListener('visibilitychange', reconnectIfDown)
+      if (reconnectTimerRef.current !== null) {
+        window.clearTimeout(reconnectTimerRef.current)
+        reconnectTimerRef.current = null
+      }
       streamBuffers.forEach((streamBuffer) => {
         streamBuffer.ended = true
         notifyStreamWaiters(streamBuffer)
@@ -2135,5 +2364,6 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
     enableSound: unlockAudio,
     voiceMode,
     setVoiceMode,
+    isConnected,
   }
 }

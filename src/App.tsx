@@ -68,6 +68,7 @@ function App() {
     enableSound,
     voiceMode,
     setVoiceMode,
+    isConnected,
   } = useNovaRuntime({
     onUserTranscript: addVoiceUserMessage,
     onPartialUserTranscript: updateVoiceDraft,
@@ -163,6 +164,7 @@ function App() {
           isStreaming={isStreaming}
           isNovaEnabled={isNovaEnabled}
           voiceMode={voiceMode}
+          isConnected={isConnected}
           isMeetingMode={isMeetingRecording}
           isMeetingBusy={isMeetingBusy}
           isMeetingsPanelOpen={isMeetingsPanelOpen}
