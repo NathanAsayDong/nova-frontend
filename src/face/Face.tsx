@@ -9,11 +9,10 @@ interface FaceProps {
 }
 
 const MOUTH_CX = 500
-const MOUTH_CY = 690
+const MOUTH_CY = 715
 const EYE_LEFT_CX = 350
 const EYE_RIGHT_CX = 650
-const EYE_CY = 420
-const EYE_SIZE = 124
+const EYE_CY = 432
 
 /** Where the eyes look per mode when nothing else is pulling them (x, y in -1..1). */
 const GAZE_BY_MODE: Record<FaceMode, [number, number]> = {
@@ -209,10 +208,10 @@ export function Face({ mode, levelRef }: FaceProps) {
       browLift += (tBrow - browLift) * (1 - Math.exp(-dt * 10))
 
       // ----- Write to the DOM -----
-      const pupilTravel = 20
+      const pupilTravel = 24
       const px = gazeX * pupilTravel
       const py = gazeY * pupilTravel * 0.8
-      const eyeShift = `translate(${(gazeX * 9).toFixed(2)} ${(gazeY * 7).toFixed(2)})`
+      const eyeShift = `translate(${(gazeX * 4).toFixed(2)} ${(gazeY * 3).toFixed(2)})`
       eyesRef.current?.setAttribute('transform', eyeShift)
       for (const [ref, cx] of [
         [pupilLeftRef, EYE_LEFT_CX],
@@ -221,10 +220,10 @@ export function Face({ mode, levelRef }: FaceProps) {
         const pupil = ref.current
         if (pupil) {
           pupil.setAttribute('x', (cx - 26 + px).toFixed(2))
-          pupil.setAttribute('y', (EYE_CY - 26 + py).toFixed(2))
+          pupil.setAttribute('y', (EYE_CY - 26 + py * 0.5).toFixed(2))
         }
       }
-      const lidHeight = Math.max(0, (1 - Math.min(openness, 1)) * EYE_SIZE * 0.5 + 0.5)
+      const lidHeight = Math.max(0, (1 - Math.min(openness, 1)) * 120 + 0.5)
       const lidLeft = lidLeftRef.current
       const lidRight = lidRightRef.current
       if (lidLeft && lidRight) {
@@ -232,26 +231,26 @@ export function Face({ mode, levelRef }: FaceProps) {
         lidLeft.setAttribute('height', heightPx)
         lidRight.setAttribute('height', heightPx)
       }
-      const eyeScale = openness > 1 ? 1 + (openness - 1) * 1.2 : 1
+      const eyeScale = 1
       eyesRef.current?.setAttribute(
         'transform',
         `${eyeShift} translate(500 ${EYE_CY}) scale(${eyeScale.toFixed(3)}) translate(-500 ${-EYE_CY})`,
       )
 
       // Mouth: a closed-curve path whose corners, lip gap and curvature morph.
-      const halfWidth = lerp(80, 235, mouthWide)
+      const halfWidth = lerp(60, 120, mouthWide)
       const cx = MOUTH_CX + mouthShift * 46
       const left = cx - halfWidth
       const right = cx + halfWidth
-      const cornerY = MOUTH_CY - mouthSmile * 34 + (mouthSmile < 0 ? 10 : 0)
-      const gap = mouthOpen * 150
-      const curve = mouthSmile * 62
+      const cornerY = MOUTH_CY - mouthSmile * 10 + (mouthSmile < 0 ? 4 : 0)
+      const gap = mouthOpen * 95
+      const curve = mouthSmile * 14
       const topY = MOUTH_CY - gap / 2
       const botY = MOUTH_CY + gap / 2
       const mouth = mouthRef.current
       if (mouth) {
         if (gap < 4) {
-          const thickness = 15 + mouthSmile * 3
+          const thickness = 12
           mouth.setAttribute(
             'd',
             `M ${left} ${cornerY} Q ${cx} ${MOUTH_CY + curve * 1.9} ${right} ${cornerY} ` +
@@ -267,15 +266,15 @@ export function Face({ mode, levelRef }: FaceProps) {
         }
       }
 
-      const browY = 300 - browLift * 34
-      const tilt = currentMode === 'thinking' ? 14 : 0
+      const browY = 372 - browLift * 16
+      const furrow = currentMode === 'thinking' ? 10 : 6
       browLeftRef.current?.setAttribute(
         'd',
-        `M ${EYE_LEFT_CX - 70} ${browY + 8 + tilt} Q ${EYE_LEFT_CX} ${browY - 14} ${EYE_LEFT_CX + 70} ${browY + 8}`,
+        `M 225 ${browY + 6} L 465 ${browY + furrow + 14} L 465 ${browY + furrow + 40} L 225 ${browY + 30} Z`,
       )
       browRightRef.current?.setAttribute(
         'd',
-        `M ${EYE_RIGHT_CX - 70} ${browY + 8} Q ${EYE_RIGHT_CX} ${browY - 14} ${EYE_RIGHT_CX + 70} ${browY + 8 + (tilt ? -6 : 0)}`,
+        `M 775 ${browY + 6} L 535 ${browY + furrow + 14} L 535 ${browY + furrow + 40} L 775 ${browY + 30} Z`,
       )
 
       frame = requestAnimationFrame(tick)
@@ -294,67 +293,74 @@ export function Face({ mode, levelRef }: FaceProps) {
       aria-label={`Nova is ${mode}`}
     >
       <defs>
-        <radialGradient id="eyeGrad" cx="50%" cy="40%" r="75%">
-          <stop offset="0%" stopColor="var(--face-bright)" />
-          <stop offset="100%" stopColor="var(--face-green)" />
-        </radialGradient>
-        <linearGradient id="mouthGrad" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="var(--face-bright)" />
-          <stop offset="100%" stopColor="var(--face-green)" />
+        <linearGradient id="skin" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stopColor="#8d8d8d" />
+          <stop offset="45%" stopColor="#e4e4e4" />
+          <stop offset="100%" stopColor="#6e6e6e" />
         </linearGradient>
-        <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
-          <feGaussianBlur stdDeviation="14" result="blur" />
-          <feMerge>
-            <feMergeNode in="blur" />
-            <feMergeNode in="SourceGraphic" />
-          </feMerge>
-        </filter>
+        <linearGradient id="jawShade" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#000" stopOpacity="0" />
+          <stop offset="100%" stopColor="#000" stopOpacity="0.45" />
+        </linearGradient>
         <clipPath id="clipLeft">
-          <rect x={EYE_LEFT_CX - EYE_SIZE / 2} y={EYE_CY - EYE_SIZE / 2} width={EYE_SIZE} height={EYE_SIZE} rx="26" />
+          <path d="M 245 430 Q 350 372 455 430 L 455 470 Q 350 500 245 470 Z" />
         </clipPath>
         <clipPath id="clipRight">
-          <rect x={EYE_RIGHT_CX - EYE_SIZE / 2} y={EYE_CY - EYE_SIZE / 2} width={EYE_SIZE} height={EYE_SIZE} rx="26" />
+          <path d="M 545 430 Q 650 372 755 430 L 755 470 Q 650 500 545 470 Z" />
         </clipPath>
       </defs>
 
-      <circle className="aura" cx="500" cy="540" r="470" />
-
       <g className="faceInner">
-        <g className="brows" filter="url(#glow)">
-          <path ref={browLeftRef} className="brow" d="" />
-          <path ref={browRightRef} className="brow" d="" />
-        </g>
+        {/* Neck */}
+        <path className="neck" d="M 380 800 L 360 1000 L 640 1000 L 620 800 Z" />
 
-        <g ref={eyesRef} className="eyes" filter="url(#glow)">
-          <rect
-            className="eye"
-            x={EYE_LEFT_CX - EYE_SIZE / 2}
-            y={EYE_CY - EYE_SIZE / 2}
-            width={EYE_SIZE}
-            height={EYE_SIZE}
-            rx="26"
-          />
-          <rect
-            className="eye"
-            x={EYE_RIGHT_CX - EYE_SIZE / 2}
-            y={EYE_CY - EYE_SIZE / 2}
-            width={EYE_SIZE}
-            height={EYE_SIZE}
-            rx="26"
-          />
+        {/* Head: tall skull, wide cheekbones, huge square jaw */}
+        <path
+          className="head"
+          d="M 500 90 C 700 90 770 200 775 360 C 778 470 790 560 800 650
+             L 790 760 Q 780 835 700 850 L 300 850 Q 220 835 210 760
+             L 200 650 C 210 560 222 470 225 360 C 230 200 300 90 500 90 Z"
+        />
+        <path className="headShade" d="M 200 640 L 210 760 Q 220 835 300 850 L 700 850 Q 780 835 790 760 L 800 640 Z" />
+
+        {/* Hairline */}
+        <path className="hair" d="M 225 330 C 215 190 300 80 500 80 C 700 80 785 190 775 330 C 760 250 700 200 500 195 C 300 200 240 250 225 330 Z" />
+
+        {/* Cheekbone and jaw definition lines */}
+        <path className="contour" d="M 235 560 C 260 700 300 790 380 830" />
+        <path className="contour" d="M 765 560 C 740 700 700 790 620 830" />
+        <path className="contour soft" d="M 300 600 Q 330 560 360 560" />
+        <path className="contour soft" d="M 700 600 Q 670 560 640 560" />
+
+        {/* Heavy brows */}
+        <path ref={browLeftRef} className="brow" d="" />
+        <path ref={browRightRef} className="brow" d="" />
+
+        {/* Hooded eyes */}
+        <g ref={eyesRef} className="eyes">
+          <path className="eyeWhite" d="M 245 430 Q 350 372 455 430 Q 350 490 245 430 Z" />
+          <path className="eyeWhite" d="M 545 430 Q 650 372 755 430 Q 650 490 545 430 Z" />
           <g clipPath="url(#clipLeft)">
-            <rect ref={pupilLeftRef} className="pupil" x={EYE_LEFT_CX - 26} y={EYE_CY - 26} width="52" height="52" rx="14" />
-            <rect ref={lidLeftRef} className="lid" x={EYE_LEFT_CX - EYE_SIZE / 2 - 2} y={EYE_CY - EYE_SIZE / 2 - 2} width={EYE_SIZE + 4} height="0" />
+            <rect ref={pupilLeftRef} className="pupil" x={324} y={404} width="52" height="52" rx="26" />
+            <rect ref={lidLeftRef} className="lid" x={240} y={370} width={220} height="0" />
           </g>
           <g clipPath="url(#clipRight)">
-            <rect ref={pupilRightRef} className="pupil" x={EYE_RIGHT_CX - 26} y={EYE_CY - 26} width="52" height="52" rx="14" />
-            <rect ref={lidRightRef} className="lid" x={EYE_RIGHT_CX - EYE_SIZE / 2 - 2} y={EYE_CY - EYE_SIZE / 2 - 2} width={EYE_SIZE + 4} height="0" />
+            <rect ref={pupilRightRef} className="pupil" x={624} y={404} width="52" height="52" rx="26" />
+            <rect ref={lidRightRef} className="lid" x={540} y={370} width={220} height="0" />
           </g>
+          <path className="lidLine" d="M 238 432 Q 350 360 462 432" />
+          <path className="lidLine" d="M 538 432 Q 650 360 762 432" />
         </g>
 
-        <path ref={mouthRef} className="mouth" filter="url(#glow)" d="" />
+        {/* Nose */}
+        <path className="contour" d="M 500 440 L 500 585" />
+        <path className="nose" d="M 440 600 Q 500 635 560 600" />
 
-        {/* Meeting mode: quietly recording. */}
+        {/* Mouth: morphs with speech */}
+        <path ref={mouthRef} className="mouth" d="" />
+        {/* Chin cleft */}
+        <path className="contour soft" d="M 500 790 L 500 830" />
+
         <g className="recDot">
           <circle className="recRing" cx="884" cy="116" r="26" />
           <circle className="recCore" cx="884" cy="116" r="14" />

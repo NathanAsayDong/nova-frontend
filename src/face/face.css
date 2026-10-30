@@ -1,10 +1,3 @@
-:root {
-  --face-green: #22c55e;
-  --face-bright: #86efac;
-  --face-green-dim: #14532d;
-  --face-glow: rgba(34, 197, 94, 0.22);
-}
-
 html,
 body,
 #root {
@@ -15,88 +8,26 @@ body,
   height: 100%;
   display: grid;
   place-items: center;
-  background: radial-gradient(circle at 50% 55%, #04110a 0%, #000000 70%);
+  background: radial-gradient(circle at 50% 45%, #1b1b1b 0%, #000000 75%);
   overflow: hidden;
 }
 
 .face {
-  width: min(94vw, 94vh);
-  height: min(94vw, 94vh);
+  width: min(96vw, 96vh);
+  height: min(96vw, 96vh);
   user-select: none;
   overflow: visible;
-  transition: --face-green 0.6s ease;
 }
 
-/* Mode palettes: color carries the mood. */
-.mode-listening {
-  --face-green: #38bdf8;
-  --face-bright: #bae6fd;
-  --face-glow: rgba(56, 189, 248, 0.22);
-}
-
-.mode-thinking {
-  --face-green: #a78bfa;
-  --face-bright: #ddd6fe;
-  --face-glow: rgba(167, 139, 250, 0.2);
-}
-
-.mode-talking {
-  --face-green: #22c55e;
-  --face-bright: #bbf7d0;
-  --face-glow: rgba(34, 197, 94, 0.3);
-}
-
-.mode-meeting {
-  --face-green: #f59e0b;
-  --face-bright: #fde68a;
-  --face-glow: rgba(245, 158, 11, 0.18);
-}
-
-.mode-off {
-  --face-green: #14532d;
-  --face-bright: #166534;
-  --face-glow: rgba(20, 83, 45, 0);
-}
-
-/* Ambient glow behind the face; pulses with the mode. */
-.aura {
-  fill: var(--face-glow);
-  filter: blur(60px);
-  transform-box: fill-box;
-  transform-origin: center;
-  animation: auraPulse 5s ease-in-out infinite;
-  transition: fill 0.6s ease;
-}
-
-.mode-talking .aura {
-  animation-duration: 1.6s;
-}
-
-.mode-off .aura {
-  animation: none;
-}
-
-@keyframes auraPulse {
-  0%,
-  100% {
-    transform: scale(0.96);
-    opacity: 0.8;
-  }
-  50% {
-    transform: scale(1.05);
-    opacity: 1;
-  }
-}
-
-/* The whole face floats and breathes so it never looks frozen. */
 .faceInner {
   transform-box: fill-box;
   transform-origin: center;
-  animation: float 6s ease-in-out infinite;
+  animation: float 7s ease-in-out infinite;
 }
 
 .mode-off .faceInner {
   animation: none;
+  opacity: 0.35;
 }
 
 @keyframes float {
@@ -105,47 +36,90 @@ body,
     transform: translateY(0) scale(1);
   }
   50% {
-    transform: translateY(-9px) scale(1.012);
+    transform: translateY(-6px) scale(1.008);
   }
+}
+
+/* ---------- Head ---------- */
+
+.neck {
+  fill: #5a5a5a;
+}
+
+.head {
+  fill: url(#skin);
+  stroke: #0a0a0a;
+  stroke-width: 6;
+}
+
+.headShade {
+  fill: url(#jawShade);
+}
+
+.hair {
+  fill: #0d0d0d;
+}
+
+.contour {
+  fill: none;
+  stroke: #1a1a1a;
+  stroke-width: 7;
+  stroke-linecap: round;
+  opacity: 0.75;
+}
+
+.contour.soft {
+  stroke-width: 5;
+  opacity: 0.4;
+}
+
+.nose {
+  fill: none;
+  stroke: #1a1a1a;
+  stroke-width: 9;
+  stroke-linecap: round;
+  opacity: 0.8;
+}
+
+/* ---------- Brows ---------- */
+
+.brow {
+  fill: #0d0d0d;
+  stroke: #0d0d0d;
+  stroke-width: 6;
+  stroke-linejoin: round;
 }
 
 /* ---------- Eyes ---------- */
 
-.eye {
-  fill: url(#eyeGrad);
+.eyeWhite {
+  fill: #f2f2f2;
 }
 
 .pupil {
-  fill: #031a0d;
-  opacity: 0.88;
+  fill: #050505;
 }
 
-.mode-thinking .pupil {
-  fill: #1e1038;
-}
-
-.mode-listening .pupil {
-  fill: #06263b;
-}
-
-.mode-meeting .pupil {
-  fill: #3a2403;
-}
-
-/* Eyelids are painted in the background color and slide down from the top. */
 .lid {
-  fill: #020a05;
+  fill: #9a9a9a;
 }
 
-/* Blink: squash the whole eye pair quickly. */
-.eyes {
-  transform-box: view-box;
-  transition: opacity 0.4s ease;
+.lidLine {
+  fill: none;
+  stroke: #0d0d0d;
+  stroke-width: 12;
+  stroke-linecap: round;
 }
 
-.face.blinking .eye,
+.face.blinking .eyeWhite,
 .face.blinking .pupil {
   animation: blinkSquash 0.12s ease-in-out;
+}
+
+.eyeWhite,
+.pupil {
+  transform-box: fill-box;
+  transform-origin: center;
 }
 
 @keyframes blinkSquash {
@@ -158,41 +132,17 @@ body,
   }
 }
 
-.eye,
-.pupil {
-  transform-box: fill-box;
-  transform-origin: center;
-}
-
-/* ---------- Brows ---------- */
-
-.brow {
-  fill: none;
-  stroke: var(--face-green);
-  stroke-width: 18;
-  stroke-linecap: round;
-  opacity: 0;
-  transition: opacity 0.4s ease;
-}
-
-.mode-listening .brow,
-.mode-thinking .brow,
-.mode-talking .brow {
-  opacity: 0.85;
-}
-
 /* ---------- Mouth ---------- */
 
 .mouth {
-  fill: url(#mouthGrad);
-  stroke: var(--face-green);
-  stroke-width: 10;
+  fill: #1a0d0d;
+  stroke: #0d0d0d;
+  stroke-width: 9;
   stroke-linejoin: round;
-  transition: opacity 0.3s ease;
 }
 
-.mode-off .mouth {
-  opacity: 0.6;
+.mode-talking .mouth {
+  fill: #2a0f0f;
 }
 
 /* ---------- Meeting recording dot ---------- */
@@ -237,15 +187,14 @@ body,
   left: 0;
   right: 0;
   text-align: center;
-  color: var(--face-green-dim);
+  color: #666;
   font-family: 'Nunito', 'Avenir Next', 'Segoe UI', sans-serif;
   font-size: 14px;
   letter-spacing: 0.08em;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .faceInner,
-  .aura {
+  .faceInner {
     animation: none;
   }
 }
