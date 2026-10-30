@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import type { RefObject } from 'react'
 import type { FaceMode } from '../features/face/faceTypes'
 
@@ -9,10 +9,20 @@ interface FaceProps {
 }
 
 const MOUTH_CX = 500
-const MOUTH_CY = 715
-const EYE_LEFT_CX = 350
-const EYE_RIGHT_CX = 650
-const EYE_CY = 432
+const MOUTH_CY = 742
+
+/**
+ * The eyes are two glowing blades with a positive canthal tilt (outer corner
+ * higher than the inner one). Everything about them is defined for the left
+ * eye; the right eye is the same shape mirrored across x = 500.
+ */
+const EYE_CX = 358
+const EYE_CY = 486
+const EYE_OUTER = { x: 262, y: 468 }
+const EYE_INNER = { x: 452, y: 502 }
+const EYE_PATH =
+  `M ${EYE_OUTER.x} ${EYE_OUTER.y - 20} L ${EYE_INNER.x} ${EYE_INNER.y - 14} ` +
+  `L ${EYE_INNER.x - 16} ${EYE_INNER.y + 17} L ${EYE_OUTER.x + 22} ${EYE_OUTER.y + 18} Z`
 
 /** Where the eyes look per mode when nothing else is pulling them (x, y in -1..1). */
 const GAZE_BY_MODE: Record<FaceMode, [number, number]> = {
@@ -27,28 +37,29 @@ const GAZE_BY_MODE: Record<FaceMode, [number, number]> = {
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t
 
 /**
- * Nova's gamified face, v3.
+ * Nova's face: a flat, symbolic gigachad glyph rather than a drawn character.
  *
- * One requestAnimationFrame loop drives everything that needs to feel alive:
- * eye gaze (cursor tracking + idle saccades + thinking wander), eyelid
- * openness (blinks, squints, sleep), and a continuously morphing mouth path
- * that follows the speech level with fast attack and slow release. Expression
- * colors and the ambient glow come from the mode class in CSS.
+ * The head is a hard shield silhouette (square jaw, broad chin) lit with flat
+ * facets. Eyes are glowing blades with a bright core that tracks the cursor,
+ * under a heavy straight brow. One requestAnimationFrame loop drives gaze,
+ * eyelid openness (blinks, squints, sleep), brows and an angular mouth that
+ * follows the speech level with fast attack and slow release. The mode's
+ * color and aura come from CSS.
  */
 export function Face({ mode, levelRef }: FaceProps) {
   const svgRef = useRef<SVGSVGElement>(null)
-  const eyesRef = useRef<SVGGElement>(null)
-  const pupilLeftRef = useRef<SVGRectElement>(null)
-  const pupilRightRef = useRef<SVGRectElement>(null)
-  const lidLeftRef = useRef<SVGRectElement>(null)
-  const lidRightRef = useRef<SVGRectElement>(null)
+  const eyeLeftRef = useRef<SVGGElement>(null)
+  const eyeRightRef = useRef<SVGGElement>(null)
+  const coreLeftRef = useRef<SVGRectElement>(null)
+  const coreRightRef = useRef<SVGRectElement>(null)
   const mouthRef = useRef<SVGPathElement>(null)
+  const creaseRef = useRef<SVGPathElement>(null)
   const browLeftRef = useRef<SVGPathElement>(null)
   const browRightRef = useRef<SVGPathElement>(null)
   const modeRef = useRef<FaceMode>(mode)
+  const blinkingRef = useRef(false)
   const cursorRef = useRef<[number, number] | null>(null)
   const cursorSeenAtRef = useRef(0)
-  const [isBlinking, setIsBlinking] = useState(false)
 
   useEffect(() => {
     modeRef.current = mode
@@ -72,33 +83,29 @@ export function Face({ mode, levelRef }: FaceProps) {
   // Random blinks while awake, with the occasional double blink.
   useEffect(() => {
     if (mode === 'off') return
-    let t1: number | null = null
-    let t2: number | null = null
-    let t3: number | null = null
-    const schedule = () => {
-      t1 = window.setTimeout(
-        () => {
-          setIsBlinking(true)
-          t2 = window.setTimeout(() => {
-            setIsBlinking(false)
-            if (Math.random() < 0.18) {
-              t3 = window.setTimeout(() => {
-                setIsBlinking(true)
-                window.setTimeout(() => setIsBlinking(false), 110)
-              }, 160)
-            }
-            schedule()
-          }, 120)
-        },
-        2600 + Math.random() * 4400,
+    const timers: number[] = []
+    const blink = (after: number, hold: number, then?: () => void) => {
+      timers.push(
+        window.setTimeout(() => {
+          blinkingRef.current = true
+          timers.push(
+            window.setTimeout(() => {
+              blinkingRef.current = false
+              then?.()
+            }, hold),
+          )
+        }, after),
       )
     }
+    const schedule = () =>
+      blink(2600 + Math.random() * 4400, 130, () => {
+        if (Math.random() < 0.18) blink(170, 110, schedule)
+        else schedule()
+      })
     schedule()
     return () => {
-      if (t1 !== null) clearTimeout(t1)
-      if (t2 !== null) clearTimeout(t2)
-      if (t3 !== null) clearTimeout(t3)
-      setIsBlinking(false)
+      timers.forEach(clearTimeout)
+      blinkingRef.current = false
     }
   }, [mode])
 
@@ -112,13 +119,17 @@ export function Face({ mode, levelRef }: FaceProps) {
     let saccadeY = 0
     let nextSaccadeAt = last + 1500
     let smoothed = 0
-    let openness = 0 // 0 closed .. 1 wide
+    let openness = 1 // 0 closed .. 1 normal .. 1.15 wide
     let mouthOpen = 0
-    let mouthWide = 0
+    let mouthWide = 1
     let mouthSmile = 0
     let mouthShift = 0
     let browLift = 0
+    let browFurrow = 0
     let wobblePhase = 0
+
+    const eyeCenterLineY = (x: number) =>
+      EYE_OUTER.y + ((x - EYE_OUTER.x) / (EYE_INNER.x - EYE_OUTER.x)) * (EYE_INNER.y - EYE_OUTER.y)
 
     const tick = (now: number) => {
       const dt = Math.min(0.05, (now - last) / 1000)
@@ -156,41 +167,40 @@ export function Face({ mode, levelRef }: FaceProps) {
       if (currentMode === 'off') targetOpen = 0.06
       else if (currentMode === 'meeting') targetOpen = 0.62
       else if (currentMode === 'thinking') targetOpen = 0.78
-      else if (currentMode === 'listening') targetOpen = 1.1
-      else if (currentMode === 'talking') targetOpen = 1 - smoothed * 0.18
-      openness += (targetOpen - openness) * (1 - Math.exp(-dt * 14))
+      else if (currentMode === 'listening') targetOpen = 1.14
+      else if (currentMode === 'talking') targetOpen = 1 - smoothed * 0.16
+      if (blinkingRef.current) targetOpen = 0.04
+      openness += (targetOpen - openness) * (1 - Math.exp(-dt * (blinkingRef.current ? 40 : 14)))
 
       // ----- Mouth targets -----
-      let tOpen = 0.02
+      let tOpen = 0
       let tWide = 1
       let tSmile = 0
       let tShift = 0
       switch (currentMode) {
         case 'idle':
           tSmile = 1
-          tOpen = 0.0
           break
         case 'listening':
-          tOpen = 0.16
-          tWide = 0.26
-          tSmile = 0.15
+          tOpen = 0.12
+          tWide = 0.3
+          tSmile = 0.1
           break
         case 'thinking':
-          tOpen = 0.02
-          tWide = 0.48
-          tSmile = -0.12
+          tWide = 0.5
+          tSmile = -0.2
           tShift = 0.5
           break
         case 'talking': {
           const jitter = Math.sin(wobblePhase * 23) * 0.05 * smoothed
           tOpen = Math.min(1, smoothed * 1.55 + jitter)
           tWide = 1 - Math.min(0.5, smoothed * 0.65)
-          tSmile = smoothed < 0.06 ? 0.45 : 0.1
+          tSmile = smoothed < 0.06 ? 0.6 : 0.1
           break
         }
         case 'meeting':
           tSmile = 0.5
-          tWide = 0.68
+          tWide = 0.75
           break
         case 'off':
           tWide = 0.7
@@ -206,76 +216,77 @@ export function Face({ mode, levelRef }: FaceProps) {
       const tBrow =
         currentMode === 'listening' ? 1 : currentMode === 'thinking' ? 0.5 : currentMode === 'talking' ? smoothed * 0.6 : 0
       browLift += (tBrow - browLift) * (1 - Math.exp(-dt * 10))
+      browFurrow += ((currentMode === 'thinking' ? 1 : 0) - browFurrow) * (1 - Math.exp(-dt * 8))
 
       // ----- Write to the DOM -----
-      const pupilTravel = 24
-      const px = gazeX * pupilTravel
-      const py = gazeY * pupilTravel * 0.8
-      const eyeShift = `translate(${(gazeX * 4).toFixed(2)} ${(gazeY * 3).toFixed(2)})`
-      eyesRef.current?.setAttribute('transform', eyeShift)
-      for (const [ref, cx] of [
-        [pupilLeftRef, EYE_LEFT_CX],
-        [pupilRightRef, EYE_RIGHT_CX],
+      const shiftX = gazeX * 5
+      const shiftY = gazeY * 3
+      const sy = Math.max(0.05, openness)
+      const eyeScale = `translate(${EYE_CX} ${EYE_CY}) scale(1 ${sy.toFixed(3)}) translate(${-EYE_CX} ${-EYE_CY})`
+      eyeLeftRef.current?.setAttribute('transform', `translate(${shiftX.toFixed(2)} ${shiftY.toFixed(2)}) ${eyeScale}`)
+      eyeRightRef.current?.setAttribute(
+        'transform',
+        `translate(${shiftX.toFixed(2)} ${shiftY.toFixed(2)}) translate(1000 0) scale(-1 1) ${eyeScale}`,
+      )
+      // The bright core slides along the slit. The right eye is drawn in a
+      // mirrored frame, so its horizontal gaze offset is negated there.
+      for (const [ref, dir] of [
+        [coreLeftRef, 1],
+        [coreRightRef, -1],
       ] as const) {
-        const pupil = ref.current
-        if (pupil) {
-          pupil.setAttribute('x', (cx - 26 + px).toFixed(2))
-          pupil.setAttribute('y', (EYE_CY - 26 + py * 0.5).toFixed(2))
+        const core = ref.current
+        if (core) {
+          const x = EYE_CX + dir * gazeX * 62
+          core.setAttribute('x', (x - 14).toFixed(2))
+          core.setAttribute('y', (eyeCenterLineY(x) + gazeY * 7 - 32).toFixed(2))
         }
       }
-      const lidHeight = Math.max(0, (1 - Math.min(openness, 1)) * 120 + 0.5)
-      const lidLeft = lidLeftRef.current
-      const lidRight = lidRightRef.current
-      if (lidLeft && lidRight) {
-        const heightPx = lidHeight.toFixed(2)
-        lidLeft.setAttribute('height', heightPx)
-        lidRight.setAttribute('height', heightPx)
-      }
-      const eyeScale = 1
-      eyesRef.current?.setAttribute(
-        'transform',
-        `${eyeShift} translate(500 ${EYE_CY}) scale(${eyeScale.toFixed(3)}) translate(-500 ${-EYE_CY})`,
-      )
 
-      // Mouth: a closed-curve path whose corners, lip gap and curvature morph.
-      const halfWidth = lerp(60, 120, mouthWide)
-      const cx = MOUTH_CX + mouthShift * 46
+      // Brows: straight heavy bars; they lift for attention and drop when thinking.
+      const lift = browLift * 20
+      const drop = browFurrow * 9
+      const outerY = 418 - lift
+      const innerY = 448 - lift + drop
+      browLeftRef.current?.setAttribute('d', `M 250 ${outerY.toFixed(1)} L 458 ${innerY.toFixed(1)}`)
+      browRightRef.current?.setAttribute('d', `M 750 ${outerY.toFixed(1)} L 542 ${innerY.toFixed(1)}`)
+
+      // Mouth: an angular polygon. Closed it collapses to a flat line with a
+      // faint smirk (right corner higher); speaking opens it into a hexagon.
+      const halfWidth = lerp(56, 96, mouthWide)
+      const cx = MOUTH_CX + mouthShift * 40
       const left = cx - halfWidth
       const right = cx + halfWidth
-      const cornerY = MOUTH_CY - mouthSmile * 10 + (mouthSmile < 0 ? 4 : 0)
-      const gap = mouthOpen * 95
-      const curve = mouthSmile * 14
-      const topY = MOUTH_CY - gap / 2
-      const botY = MOUTH_CY + gap / 2
+      // A permanent slight smirk: the right corner sits higher than the left,
+      // and rises further as the mouth relaxes into a smile.
+      const smirk = 0.4 + 0.6 * Math.max(0, Math.min(1, mouthSmile))
+      const cornerL = MOUTH_CY + 3 - smirk * 4
+      const cornerR = MOUTH_CY - 2 - smirk * 24
+      const gap = mouthOpen * 92
+      const lineY = (x: number) => lerp(cornerL, cornerR, (x - left) / (right - left))
+      const inL = left + halfWidth * 0.34
+      const inR = right - halfWidth * 0.34
+      const botL = left + halfWidth * 0.5
+      const botR = right - halfWidth * 0.5
+      // Dimple at the raised corner.
+      const crease = creaseRef.current
+      if (crease) {
+        const dx = right + 20
+        const dy = cornerR - 6
+        crease.setAttribute('d', `M ${dx.toFixed(1)} ${dy.toFixed(1)} Q ${(dx + 12).toFixed(1)} ${(dy + 18).toFixed(1)} ${dx.toFixed(1)} ${(dy + 38).toFixed(1)}`)
+        crease.style.opacity = (0.15 + smirk * 0.4).toFixed(2)
+      }
       const mouth = mouthRef.current
       if (mouth) {
-        if (gap < 4) {
-          const thickness = 12
-          mouth.setAttribute(
-            'd',
-            `M ${left} ${cornerY} Q ${cx} ${MOUTH_CY + curve * 1.9} ${right} ${cornerY} ` +
-              `Q ${cx} ${MOUTH_CY + curve * 1.9 + thickness} ${left} ${cornerY} Z`,
-          )
-        } else {
-          mouth.setAttribute(
-            'd',
-            `M ${left} ${cornerY} Q ${cx} ${topY - curve * 0.3 - 6} ${right} ${cornerY} ` +
-              `Q ${cx + halfWidth * 0.1} ${botY + 34 + curve * 0.8} ${cx} ${botY + 26 + curve * 0.5} ` +
-              `Q ${cx - halfWidth * 0.1} ${botY + 34 + curve * 0.8} ${left} ${cornerY} Z`,
-          )
-        }
+        mouth.setAttribute(
+          'd',
+          `M ${left.toFixed(1)} ${cornerL.toFixed(1)} ` +
+            `L ${inL.toFixed(1)} ${(lineY(inL) - gap * 0.25).toFixed(1)} ` +
+            `L ${inR.toFixed(1)} ${(lineY(inR) - gap * 0.25).toFixed(1)} ` +
+            `L ${right.toFixed(1)} ${cornerR.toFixed(1)} ` +
+            `L ${botR.toFixed(1)} ${(lineY(botR) + gap * 0.75).toFixed(1)} ` +
+            `L ${botL.toFixed(1)} ${(lineY(botL) + gap * 0.75).toFixed(1)} Z`,
+        )
       }
-
-      const browY = 372 - browLift * 16
-      const furrow = currentMode === 'thinking' ? 10 : 6
-      browLeftRef.current?.setAttribute(
-        'd',
-        `M 225 ${browY + 6} L 465 ${browY + furrow + 14} L 465 ${browY + furrow + 40} L 225 ${browY + 30} Z`,
-      )
-      browRightRef.current?.setAttribute(
-        'd',
-        `M 775 ${browY + 6} L 535 ${browY + furrow + 14} L 535 ${browY + furrow + 40} L 775 ${browY + 30} Z`,
-      )
 
       frame = requestAnimationFrame(tick)
     }
@@ -284,82 +295,81 @@ export function Face({ mode, levelRef }: FaceProps) {
     return () => cancelAnimationFrame(frame)
   }, [levelRef])
 
+  const headPath =
+    'M 330 105 L 670 105 L 752 160 L 786 330 L 800 540 L 792 690 L 738 830 L 650 884 ' +
+    'L 350 884 L 262 830 L 208 690 L 200 540 L 214 330 L 248 160 Z'
+
   return (
     <svg
       ref={svgRef}
-      className={`face mode-${mode}${isBlinking ? ' blinking' : ''}`}
+      className={`face mode-${mode}`}
       viewBox="0 0 1000 1000"
       role="img"
       aria-label={`Nova is ${mode}`}
     >
       <defs>
-        <linearGradient id="skin" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stopColor="#8d8d8d" />
-          <stop offset="45%" stopColor="#e4e4e4" />
-          <stop offset="100%" stopColor="#6e6e6e" />
-        </linearGradient>
-        <linearGradient id="jawShade" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#000" stopOpacity="0" />
-          <stop offset="100%" stopColor="#000" stopOpacity="0.45" />
-        </linearGradient>
-        <clipPath id="clipLeft">
-          <path d="M 245 430 Q 350 372 455 430 L 455 470 Q 350 500 245 470 Z" />
+        <clipPath id="headClip">
+          <path d={headPath} />
         </clipPath>
-        <clipPath id="clipRight">
-          <path d="M 545 430 Q 650 372 755 430 L 755 470 Q 650 500 545 470 Z" />
+        <clipPath id="slitClip">
+          <path d={EYE_PATH} />
         </clipPath>
+        <linearGradient id="skin" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#383d45" />
+          <stop offset="100%" stopColor="#23272d" />
+        </linearGradient>
       </defs>
 
+      <ellipse className="aura" cx="500" cy="480" rx="400" ry="430" />
+
       <g className="faceInner">
-        {/* Neck */}
-        <path className="neck" d="M 380 800 L 360 1000 L 640 1000 L 620 800 Z" />
+        {/* Neck: thick, running off the bottom edge */}
+        <path className="neck" d="M 372 868 L 330 1000 L 670 1000 L 628 868 Z" />
 
-        {/* Head: tall skull, wide cheekbones, huge square jaw */}
-        <path
-          className="head"
-          d="M 500 90 C 700 90 770 200 775 360 C 778 470 790 560 800 650
-             L 790 760 Q 780 835 700 850 L 300 850 Q 220 835 210 760
-             L 200 650 C 210 560 222 470 225 360 C 230 200 300 90 500 90 Z"
-        />
-        <path className="headShade" d="M 200 640 L 210 760 Q 220 835 300 850 L 700 850 Q 780 835 790 760 L 800 640 Z" />
+        {/* Head */}
+        <path className="head" d={headPath} />
+        <g clipPath="url(#headClip)">
+          {/* Flat facets: hair mass, lit cheek planes, shadowed jaw sides. */}
+          <path className="hair" d="M 150 40 L 850 40 L 850 330 L 760 298 L 640 262 L 500 254 L 360 262 L 240 298 L 150 330 Z" />
+          <path className="hairEdge" d="M 214 330 L 240 298 L 360 262 L 500 254 L 640 262 L 760 298 L 786 330" />
+          <path className="shadow" d="M 190 560 L 262 604 L 332 784 L 392 900 L 190 900 Z" />
+          <path className="shadow" d="M 810 560 L 738 604 L 668 784 L 608 900 L 810 900 Z" />
+          <path className="plane" d="M 500 254 L 640 262 L 760 298 L 800 540 L 800 900 L 500 900 Z" />
+          <path className="cheekline" d="M 262 604 L 332 784 L 392 884" />
+          <path className="cheekline" d="M 738 604 L 668 784 L 608 884" />
+          <path className="cheekbone" d="M 282 560 L 392 580" />
+          <path className="cheekbone" d="M 718 560 L 608 580" />
+        </g>
+        <path className="rim" d={headPath} />
 
-        {/* Hairline */}
-        <path className="hair" d="M 225 330 C 215 190 300 80 500 80 C 700 80 785 190 775 330 C 760 250 700 200 500 195 C 300 200 240 250 225 330 Z" />
-
-        {/* Cheekbone and jaw definition lines */}
-        <path className="contour" d="M 235 560 C 260 700 300 790 380 830" />
-        <path className="contour" d="M 765 560 C 740 700 700 790 620 830" />
-        <path className="contour soft" d="M 300 600 Q 330 560 360 560" />
-        <path className="contour soft" d="M 700 600 Q 670 560 640 560" />
-
-        {/* Heavy brows */}
+        {/* Heavy straight brows */}
         <path ref={browLeftRef} className="brow" d="" />
         <path ref={browRightRef} className="brow" d="" />
 
-        {/* Hooded eyes */}
-        <g ref={eyesRef} className="eyes">
-          <path className="eyeWhite" d="M 245 430 Q 350 372 455 430 Q 350 490 245 430 Z" />
-          <path className="eyeWhite" d="M 545 430 Q 650 372 755 430 Q 650 490 545 430 Z" />
-          <g clipPath="url(#clipLeft)">
-            <rect ref={pupilLeftRef} className="pupil" x={324} y={404} width="52" height="52" rx="26" />
-            <rect ref={lidLeftRef} className="lid" x={240} y={370} width={220} height="0" />
+        {/* Blade eyes; the bright core is the gaze. */}
+        <g ref={eyeLeftRef} className="eye">
+          <path className="slit" d={EYE_PATH} />
+          <g clipPath="url(#slitClip)">
+            <rect ref={coreLeftRef} className="core" x={EYE_CX - 14} y={EYE_CY - 32} width="28" height="64" rx="14" />
           </g>
-          <g clipPath="url(#clipRight)">
-            <rect ref={pupilRightRef} className="pupil" x={624} y={404} width="52" height="52" rx="26" />
-            <rect ref={lidRightRef} className="lid" x={540} y={370} width={220} height="0" />
+        </g>
+        <g ref={eyeRightRef} className="eye">
+          <path className="slit" d={EYE_PATH} />
+          <g clipPath="url(#slitClip)">
+            <rect ref={coreRightRef} className="core" x={EYE_CX - 14} y={EYE_CY - 32} width="28" height="64" rx="14" />
           </g>
-          <path className="lidLine" d="M 238 432 Q 350 360 462 432" />
-          <path className="lidLine" d="M 538 432 Q 650 360 762 432" />
         </g>
 
-        {/* Nose */}
-        <path className="contour" d="M 500 440 L 500 585" />
-        <path className="nose" d="M 440 600 Q 500 635 560 600" />
+        {/* Nose: a bridge line and a flat base */}
+        <path className="line" d="M 500 476 L 500 612" />
+        <path className="line base" d="M 452 628 L 500 646 L 548 628" />
 
         {/* Mouth: morphs with speech */}
         <path ref={mouthRef} className="mouth" d="" />
+        <path ref={creaseRef} className="line" d="" />
+
         {/* Chin cleft */}
-        <path className="contour soft" d="M 500 790 L 500 830" />
+        <path className="line soft" d="M 500 818 L 500 856" />
 
         <g className="recDot">
           <circle className="recRing" cx="884" cy="116" r="26" />

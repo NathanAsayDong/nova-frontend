@@ -15,11 +15,25 @@ const PING_INTERVAL_MS = 25_000
  * directly; a React re-render per level packet would be wasteful).
  */
 export function FacePage() {
-  const [mode, setMode] = useState<FaceMode>('off')
-  const [connected, setConnected] = useState(false)
+  // `?mode=talking` previews an expression without a backend: it pins the
+  // mode and, for talking, feeds a synthetic speech level.
+  const previewMode = new URLSearchParams(window.location.search).get('mode') as FaceMode | null
+  const [mode, setMode] = useState<FaceMode>(previewMode ?? 'off')
+  const [connected, setConnected] = useState(previewMode !== null)
   const levelRef = useRef(0)
 
   useEffect(() => {
+    if (previewMode !== 'talking') return
+    const timer = window.setInterval(() => {
+      const t = performance.now() / 1000
+      const syllable = Math.max(0, Math.sin(t * 9)) * (0.55 + 0.45 * Math.sin(t * 2.3))
+      levelRef.current = Math.max(0, Math.min(1, syllable))
+    }, 50)
+    return () => clearInterval(timer)
+  }, [previewMode])
+
+  useEffect(() => {
+    if (previewMode) return
     let cancelled = false
     let socket: WebSocket | null = null
     let reconnectTimer: number | null = null
@@ -114,7 +128,7 @@ export function FacePage() {
         socket.close()
       }
     }
-  }, [])
+  }, [previewMode])
 
   return (
     <div className="faceScreen">

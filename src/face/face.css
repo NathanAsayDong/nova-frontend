@@ -1,3 +1,9 @@
+:root {
+  --face-green: #22c55e;
+  --face-bright: #bbf7d0;
+  --face-glow: rgba(34, 197, 94, 0.22);
+}
+
 html,
 body,
 #root {
@@ -8,7 +14,7 @@ body,
   height: 100%;
   display: grid;
   place-items: center;
-  background: radial-gradient(circle at 50% 45%, #1b1b1b 0%, #000000 75%);
+  background: radial-gradient(circle at 50% 45%, #0f1114 0%, #000000 75%);
   overflow: hidden;
 }
 
@@ -19,130 +25,199 @@ body,
   overflow: visible;
 }
 
+/* Mode palettes: color carries the mood. */
+.mode-listening {
+  --face-green: #38bdf8;
+  --face-bright: #e0f2fe;
+  --face-glow: rgba(56, 189, 248, 0.22);
+}
+
+.mode-thinking {
+  --face-green: #a78bfa;
+  --face-bright: #ede9fe;
+  --face-glow: rgba(167, 139, 250, 0.2);
+}
+
+.mode-talking {
+  --face-green: #22c55e;
+  --face-bright: #dcfce7;
+  --face-glow: rgba(34, 197, 94, 0.3);
+}
+
+.mode-meeting {
+  --face-green: #f59e0b;
+  --face-bright: #fef3c7;
+  --face-glow: rgba(245, 158, 11, 0.18);
+}
+
+.mode-off {
+  --face-green: #1f6b3d;
+  --face-bright: #2f8f57;
+  --face-glow: rgba(20, 83, 45, 0);
+}
+
+/* Ambient glow behind the head; pulses with the mode. */
+.aura {
+  fill: var(--face-glow);
+  filter: blur(70px);
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: auraPulse 5s ease-in-out infinite;
+  transition: fill 0.6s ease;
+}
+
+.mode-talking .aura {
+  animation-duration: 1.6s;
+}
+
+.mode-off .aura {
+  animation: none;
+}
+
+@keyframes auraPulse {
+  0%,
+  100% {
+    transform: scale(0.96);
+    opacity: 0.8;
+  }
+  50% {
+    transform: scale(1.05);
+    opacity: 1;
+  }
+}
+
 .faceInner {
   transform-box: fill-box;
   transform-origin: center;
   animation: float 7s ease-in-out infinite;
+  transition: opacity 0.5s ease;
 }
 
 .mode-off .faceInner {
   animation: none;
-  opacity: 0.35;
+  opacity: 0.45;
 }
 
 @keyframes float {
   0%,
   100% {
-    transform: translateY(0) scale(1);
+    transform: translateY(0);
   }
   50% {
-    transform: translateY(-6px) scale(1.008);
+    transform: translateY(-8px);
   }
 }
 
-/* ---------- Head ---------- */
+/* ---------- Head: flat facets, mood-colored rim ---------- */
 
 .neck {
-  fill: #5a5a5a;
+  fill: #181b20;
 }
 
 .head {
   fill: url(#skin);
-  stroke: #0a0a0a;
-  stroke-width: 6;
-}
-
-.headShade {
-  fill: url(#jawShade);
 }
 
 .hair {
-  fill: #0d0d0d;
+  fill: #101215;
 }
 
-.contour {
+.hairEdge {
   fill: none;
-  stroke: #1a1a1a;
-  stroke-width: 7;
-  stroke-linecap: round;
-  opacity: 0.75;
-}
-
-.contour.soft {
+  stroke: #3a4048;
   stroke-width: 5;
-  opacity: 0.4;
+  stroke-linejoin: round;
 }
 
-.nose {
+.shadow {
+  fill: #000;
+  opacity: 0.42;
+}
+
+.plane {
+  fill: #000;
+  opacity: 0.12;
+}
+
+.cheekline {
   fill: none;
-  stroke: #1a1a1a;
-  stroke-width: 9;
+  stroke: #5a616b;
+  stroke-width: 6;
   stroke-linecap: round;
-  opacity: 0.8;
+  stroke-linejoin: round;
+  opacity: 0.6;
 }
 
-/* ---------- Brows ---------- */
+.cheekbone {
+  fill: none;
+  stroke: #5a616b;
+  stroke-width: 6;
+  stroke-linecap: round;
+  opacity: 0.35;
+}
+
+.rim {
+  fill: none;
+  stroke: var(--face-green);
+  stroke-width: 9;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 0 14px var(--face-glow));
+  transition: stroke 0.6s ease;
+}
+
+/* ---------- Brows and facial lines ---------- */
 
 .brow {
-  fill: #0d0d0d;
-  stroke: #0d0d0d;
-  stroke-width: 6;
+  fill: none;
+  stroke: #eef1f4;
+  stroke-width: 24;
+  stroke-linecap: butt;
+}
+
+.line {
+  fill: none;
+  stroke: #0b0c0e;
+  stroke-width: 7;
+  stroke-linecap: round;
   stroke-linejoin: round;
+  opacity: 0.5;
+}
+
+.line.soft {
+  opacity: 0.3;
 }
 
 /* ---------- Eyes ---------- */
 
-.eyeWhite {
-  fill: #f2f2f2;
+.eye {
+  filter: drop-shadow(0 0 12px var(--face-green));
 }
 
-.pupil {
-  fill: #050505;
+.slit {
+  fill: var(--face-green);
+  stroke: var(--face-green);
+  stroke-width: 6;
+  stroke-linejoin: round;
+  transition: fill 0.6s ease, stroke 0.6s ease;
 }
 
-.lid {
-  fill: #9a9a9a;
-}
-
-.lidLine {
-  fill: none;
-  stroke: #0d0d0d;
-  stroke-width: 12;
-  stroke-linecap: round;
-}
-
-.face.blinking .eyeWhite,
-.face.blinking .pupil {
-  animation: blinkSquash 0.12s ease-in-out;
-}
-
-.eyeWhite,
-.pupil {
-  transform-box: fill-box;
-  transform-origin: center;
-}
-
-@keyframes blinkSquash {
-  0%,
-  100% {
-    transform: scaleY(1);
-  }
-  50% {
-    transform: scaleY(0.05);
-  }
+.core {
+  fill: var(--face-bright);
+  transition: fill 0.6s ease;
 }
 
 /* ---------- Mouth ---------- */
 
 .mouth {
-  fill: #1a0d0d;
-  stroke: #0d0d0d;
-  stroke-width: 9;
+  fill: #07090b;
+  stroke: #eef1f4;
+  stroke-width: 13;
   stroke-linejoin: round;
+  stroke-linecap: round;
 }
 
 .mode-talking .mouth {
-  fill: #2a0f0f;
+  fill: color-mix(in srgb, var(--face-green) 22%, #07090b);
 }
 
 /* ---------- Meeting recording dot ---------- */
@@ -194,7 +269,8 @@ body,
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .faceInner {
+  .faceInner,
+  .aura {
     animation: none;
   }
 }
