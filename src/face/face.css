@@ -1,6 +1,8 @@
 :root {
   --face-green: #22c55e;
+  --face-bright: #86efac;
   --face-green-dim: #14532d;
+  --face-glow: rgba(34, 197, 94, 0.22);
 }
 
 html,
@@ -13,179 +15,184 @@ body,
   height: 100%;
   display: grid;
   place-items: center;
-  background: #000000;
+  background: radial-gradient(circle at 50% 55%, #04110a 0%, #000000 70%);
   overflow: hidden;
 }
 
 .face {
-  width: min(92vw, 92vh);
-  height: min(92vw, 92vh);
+  width: min(94vw, 94vh);
+  height: min(94vw, 94vh);
   user-select: none;
+  overflow: visible;
+  transition: --face-green 0.6s ease;
 }
 
-/* The whole face breathes gently so it never looks frozen. */
+/* Mode palettes: color carries the mood. */
+.mode-listening {
+  --face-green: #38bdf8;
+  --face-bright: #bae6fd;
+  --face-glow: rgba(56, 189, 248, 0.22);
+}
+
+.mode-thinking {
+  --face-green: #a78bfa;
+  --face-bright: #ddd6fe;
+  --face-glow: rgba(167, 139, 250, 0.2);
+}
+
+.mode-talking {
+  --face-green: #22c55e;
+  --face-bright: #bbf7d0;
+  --face-glow: rgba(34, 197, 94, 0.3);
+}
+
+.mode-meeting {
+  --face-green: #f59e0b;
+  --face-bright: #fde68a;
+  --face-glow: rgba(245, 158, 11, 0.18);
+}
+
+.mode-off {
+  --face-green: #14532d;
+  --face-bright: #166534;
+  --face-glow: rgba(20, 83, 45, 0);
+}
+
+/* Ambient glow behind the face; pulses with the mode. */
+.aura {
+  fill: var(--face-glow);
+  filter: blur(60px);
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: auraPulse 5s ease-in-out infinite;
+  transition: fill 0.6s ease;
+}
+
+.mode-talking .aura {
+  animation-duration: 1.6s;
+}
+
+.mode-off .aura {
+  animation: none;
+}
+
+@keyframes auraPulse {
+  0%,
+  100% {
+    transform: scale(0.96);
+    opacity: 0.8;
+  }
+  50% {
+    transform: scale(1.05);
+    opacity: 1;
+  }
+}
+
+/* The whole face floats and breathes so it never looks frozen. */
 .faceInner {
   transform-box: fill-box;
   transform-origin: center;
-  animation: breathe 4.5s ease-in-out infinite;
+  animation: float 6s ease-in-out infinite;
 }
 
 .mode-off .faceInner {
   animation: none;
 }
 
-@keyframes breathe {
+@keyframes float {
   0%,
   100% {
-    transform: scale(1);
+    transform: translateY(0) scale(1);
   }
   50% {
-    transform: scale(1.014);
+    transform: translateY(-9px) scale(1.012);
   }
 }
 
 /* ---------- Eyes ---------- */
 
 .eye {
-  fill: var(--face-green);
-  transform-box: fill-box;
-  transform-origin: center;
-  transition:
-    transform 0.16s ease,
-    fill 0.5s ease;
+  fill: url(#eyeGrad);
 }
 
+.pupil {
+  fill: #031a0d;
+  opacity: 0.88;
+}
+
+.mode-thinking .pupil {
+  fill: #1e1038;
+}
+
+.mode-listening .pupil {
+  fill: #06263b;
+}
+
+.mode-meeting .pupil {
+  fill: #3a2403;
+}
+
+/* Eyelids are painted in the background color and slide down from the top. */
+.lid {
+  fill: #020a05;
+}
+
+/* Blink: squash the whole eye pair quickly. */
 .eyes {
-  transform-box: fill-box;
-  transform-origin: center;
-  transition: transform 0.45s ease;
+  transform-box: view-box;
+  transition: opacity 0.4s ease;
 }
 
-/* Idle: occasional soft glance to the side. */
-.mode-idle .eyes {
-  animation: glance 9s ease-in-out infinite;
+.face.blinking .eye,
+.face.blinking .pupil {
+  animation: blinkSquash 0.12s ease-in-out;
 }
 
-@keyframes glance {
-  0%,
-  55%,
-  100% {
-    transform: translateX(0);
-  }
-  60%,
-  72% {
-    transform: translateX(-22px);
-  }
-  78% {
-    transform: translateX(0);
-  }
-}
-
-/* Listening: eyes widen and lift — attentive. */
-.mode-listening .eye {
-  transform: translateY(-14px) scale(1.16);
-}
-
-/* Thinking: eyes drift up and away, slightly narrowed, wandering. */
-.mode-thinking .eyes {
-  transform: translate(36px, -44px);
-  animation: wander 5.5s ease-in-out infinite;
-}
-
-.mode-thinking .eye {
-  transform: scale(0.88);
-}
-
-@keyframes wander {
+@keyframes blinkSquash {
   0%,
   100% {
-    transform: translate(36px, -44px);
+    transform: scaleY(1);
   }
-  40% {
-    transform: translate(-26px, -50px);
-  }
-  70% {
-    transform: translate(30px, -30px);
+  50% {
+    transform: scaleY(0.05);
   }
 }
 
-/* Meeting: focused, half-lidded. */
-.mode-meeting .eye {
-  transform: scaleY(0.66);
-}
-
-/* Off: asleep — thin dim lines. */
-.mode-off .eye {
-  fill: var(--face-green-dim);
-  transform: scaleY(0.1);
-}
-
-/* Blink wins over everything; quick squash. */
-.face.blinking .eye {
-  transform: scaleY(0.08) !important;
-  transition: transform 0.06s ease;
-}
-
-/* Loud passages squint the eyes a touch (talking only). */
-.mode-talking .eye {
-  transition: transform 0.2s ease;
-}
-
-/* ---------- Mouths ---------- */
-
-.mouth {
+.eye,
+.pupil {
   transform-box: fill-box;
   transform-origin: center;
-  transition:
-    opacity 0.25s ease,
-    transform 0.35s ease;
-  opacity: 0;
 }
 
-.smile {
+/* ---------- Brows ---------- */
+
+.brow {
   fill: none;
   stroke: var(--face-green);
-  stroke-width: 36;
+  stroke-width: 18;
   stroke-linecap: round;
+  opacity: 0;
+  transition: opacity 0.4s ease;
 }
 
-.flatLine,
-.oMouth,
-.talkMouth {
-  fill: var(--face-green);
+.mode-listening .brow,
+.mode-thinking .brow,
+.mode-talking .brow {
+  opacity: 0.85;
 }
 
-.talkMouth {
-  transition:
-    opacity 0.25s ease,
-    x 0.07s ease-out,
-    y 0.07s ease-out,
-    width 0.07s ease-out,
-    height 0.07s ease-out,
-    rx 0.07s ease-out;
+/* ---------- Mouth ---------- */
+
+.mouth {
+  fill: url(#mouthGrad);
+  stroke: var(--face-green);
+  stroke-width: 10;
+  stroke-linejoin: round;
+  transition: opacity 0.3s ease;
 }
 
-/* Which mouth each mode shows. */
-.mode-idle .smile,
-.mode-listening .oMouth,
-.mode-talking .talkMouth {
-  opacity: 1;
-}
-
-.mode-meeting .smile {
-  opacity: 1;
-  transform: scale(0.8, 0.5);
-}
-
-.mode-thinking .flatLine {
-  opacity: 1;
-  transform: translateX(30px) scaleX(0.9);
-}
-
-.mode-off .flatLine {
-  opacity: 1;
-  fill: var(--face-green-dim);
-  transform: scaleX(1.5);
+.mode-off .mouth {
+  opacity: 0.6;
 }
 
 /* ---------- Meeting recording dot ---------- */
@@ -200,13 +207,13 @@ body,
 }
 
 .recCore {
-  fill: var(--face-green);
+  fill: #ef4444;
   animation: recPulse 1.6s ease-in-out infinite;
 }
 
 .recRing {
   fill: none;
-  stroke: var(--face-green);
+  stroke: #ef4444;
   stroke-width: 3;
   opacity: 0.4;
   animation: recPulse 1.6s ease-in-out infinite;
@@ -234,4 +241,11 @@ body,
   font-family: 'Nunito', 'Avenir Next', 'Segoe UI', sans-serif;
   font-size: 14px;
   letter-spacing: 0.08em;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .faceInner,
+  .aura {
+    animation: none;
+  }
 }
