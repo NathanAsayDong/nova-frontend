@@ -118,9 +118,10 @@ export type SocketEvent =
       exitCode?: number | null
       conversationId: string
     }
-  // Authoritative silent-mode state, pushed on the client's own toggle (as
-  // an ack) and whenever the `set_silent_mode` tool flips it mid-conversation.
-  // See src/features/nova/silentMode.ts for the assumed field/event names.
+  // Authoritative silent-mode state, pushed once on connect and whenever
+  // silent mode changes -- a REST POST /conversations/{id}/silent-mode from
+  // any client, or the `set_silent_mode` voice tool mid-conversation.
+  // See src/features/nova/silentMode.ts for the pinned field/event names.
   | { type: 'silent_mode_state'; enabled: boolean }
 
 export type ToolSummary = {

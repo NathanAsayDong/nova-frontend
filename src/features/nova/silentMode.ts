@@ -2,23 +2,31 @@
  * Silent mode: Nova keeps listening and replying as usual, but replies are
  * not spoken aloud -- text keeps showing up in the transcript normally.
  *
- * ASSUMED BACKEND CONTRACT (nova-backend branch `silent-mode-backend` had no
- * commits yet as of this writing -- confirm these names against whatever
- * lands there and update this file; it is the only place they're named).
+ * BACKEND CONTRACT (nova-backend branch `nova/silent-mode-backend`, plus the
+ * `nova/silent-mode-ws-push` follow-up -- this is the only place these
+ * names/shapes are pinned on the client; update here first if the contract
+ * ever changes):
  *
- * Silent mode is a per-session toggle on the same `/ws/transcribe` socket
- * `useNovaRuntime` already holds open, not a REST resource: it needs to be
- * flippable mid-conversation by the `set_silent_mode` tool the backend agent
- * loop can call, and "per session, default off on reconnect" falls out for
- * free from being socket state rather than something persisted server-side.
+ * Outgoing (client -> backend), a REST call rather than a socket command --
+ * silent mode is per-conversation server state, not per-socket:
+ *   POST /conversations/{conversationId}/silent-mode
+ *   body: { "enabled": boolean }
+ *   response: { "conversationId": string, "silentMode": boolean }
  *
- * Outgoing (client -> backend), sent the same way as the existing
- * `{ event: 'speech_pause' }` / `{ event: 'abort' }` commands:
- *   { event: SILENT_MODE_COMMAND_EVENT, [SILENT_MODE_STATE_FIELD]: boolean }
+ * The same conversation's GET /conversations/{conversationId} also reports
+ * the current value as `"silentMode": boolean`, for a client that fetches
+ * conversation state anyway and wants it without opening the socket.
  *
- * Incoming (backend -> client), pushed both as the ack of the command above
- * and whenever the `set_silent_mode` tool changes it mid-call:
- *   { type: SILENT_MODE_STATE_EVENT, [SILENT_MODE_STATE_FIELD]: boolean }
+ * Incoming (backend -> client), pushed on the existing `/ws/transcribe`
+ * socket once on connect and again whenever silent mode changes -- a voice
+ * `set_silent_mode` tool call, or a REST POST from any client (this one or
+ * another device on the same conversation):
+ *   { "type": SILENT_MODE_STATE_EVENT, [SILENT_MODE_STATE_FIELD]: boolean }
+ *
+ * This push is authoritative: it is how the REST call's own effect is
+ * reflected back (instead of trusting the POST response alone, which only
+ * tells this client what it already knows) and how the `set_silent_mode`
+ * voice tool's changes reach the client mid-conversation.
  *
  * When silent mode is turned off, the backend is expected to speak a short
  * confirmation through the ordinary `speech_text` / `assistant_audio_stream_*`
@@ -36,11 +44,16 @@
  * not the primary mechanism.
  */
 
-/** `event` value for the client's outgoing toggle command. */
-export const SILENT_MODE_COMMAND_EVENT = 'set_silent_mode'
-
 /** `type` value for the backend's authoritative state push. */
 export const SILENT_MODE_STATE_EVENT = 'silent_mode_state'
 
-/** Field name carrying the boolean on both the command and the state push. */
+/** Field name carrying the boolean on both the state push and the REST request body. */
 export const SILENT_MODE_STATE_FIELD = 'enabled'
+
+/** Field name carrying the boolean on the REST response body. */
+export const SILENT_MODE_RESPONSE_FIELD = 'silentMode'
+
+/** The REST endpoint the UI toggle posts to. */
+export function silentModeEndpoint(conversationId: string): string {
+  return `/conversations/${conversationId}/silent-mode`
+}

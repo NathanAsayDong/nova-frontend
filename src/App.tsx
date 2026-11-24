@@ -24,6 +24,7 @@ function App() {
     error: chatError,
     conversationId,
     project,
+    conversationSilentMode,
     sendMessage,
     stopStreaming,
     startNewConversation,
@@ -71,6 +72,7 @@ function App() {
     isConnected,
     isSilentMode,
     setSilentMode,
+    syncSilentModeFromServer,
   } = useNovaRuntime({
     onUserTranscript: addVoiceUserMessage,
     onPartialUserTranscript: updateVoiceDraft,
@@ -102,6 +104,17 @@ function App() {
   useEffect(() => {
     publishFaceMode(faceMode)
   }, [faceMode])
+
+  // Fallback sync for silent mode: GET /conversations/{id} (fetched by
+  // refreshConversation below for the project header) also reports
+  // silentMode. The authoritative source is still the `silent_mode_state`
+  // socket push -- this only fills the gap before that push has landed on a
+  // fresh connection (see syncSilentModeFromServer).
+  useEffect(() => {
+    if (conversationSilentMode !== null) {
+      syncSilentModeFromServer(conversationSilentMode)
+    }
+  }, [conversationSilentMode, syncSilentModeFromServer])
 
   const [projects, setProjects] = useState<ProjectSummary[]>([])
   const [isStartFormOpen, setIsStartFormOpen] = useState(false)

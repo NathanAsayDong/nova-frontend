@@ -25,8 +25,9 @@ import { playEarcon, primeEarcons } from '../earcons'
 import { createTurnDetector, type TurnDetector } from '../turnDetector'
 import { SILENT_CLIP_DATA_URI } from '../silentClip'
 import {
-  SILENT_MODE_COMMAND_EVENT,
+  SILENT_MODE_RESPONSE_FIELD,
   SILENT_MODE_STATE_FIELD,
+  silentModeEndpoint,
 } from '../silentMode'
 import { publishFaceLevel } from '../../face/publisher'
 import { authFetch } from '../../../lib/api'
@@ -127,6 +128,13 @@ type UseNovaRuntimeResult = {
    */
   isSilentMode: boolean
   setSilentMode: (enabled: boolean) => void
+  /**
+   * Fallback sync point for callers that already fetch conversation state
+   * over REST (e.g. useNovaChat's `refreshConversation`, which reads
+   * GET /conversations/{id}). Only applies before this connection's own
+   * authoritative push has landed; see `silentModeConfirmedRef`.
+   */
+  syncSilentModeFromServer: (enabled: boolean) => void
 }
 
 type NovaRuntimeOptions = {
@@ -176,6 +184,16 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
   // session" and "reconnect" both already funnel through.
   const [isSilentMode, setIsSilentModeState] = useState(false)
   const silentModeRef = useRef(false)
+  // True once this connection has heard an authoritative `silent_mode_state`
+  // push, or a REST toggle round-tripped. `syncSilentModeFromServer` (the
+  // GET /conversations/{id} fallback) only applies before that happens, so it
+  // can never stomp a push or a user's own in-flight toggle that landed
+  // after the GET request went out.
+  const silentModeConfirmedRef = useRef(false)
+  // Bumped on every local toggle and every incoming push, so a REST
+  // response that resolves after something newer has already superseded it
+  // (another toggle, or a push) is ignored instead of clobbering state.
+  const silentModeRequestIdRef = useRef(0)
   const activeCaptureRef = useRef<ActiveCapture | null>(null)
   const sentryGraceTimerRef = useRef<number | null>(null)
   const sentryListenTimerRef = useRef<number | null>(null)
@@ -1573,9 +1591,12 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
     }
 
     if (payload.type === 'silent_mode_state') {
-      // Authoritative: both the ack of this client's own toggle and a push
-      // from the `set_silent_mode` tool land here, so the UI always reflects
-      // the backend's actual state rather than just the local click.
+      // Authoritative: pushed once on connect and whenever silent mode
+      // changes -- this client's own REST toggle, another client's, or the
+      // `set_silent_mode` tool -- so the UI always reflects the backend's
+      // actual state rather than just the local click.
+      silentModeConfirmedRef.current = true
+      silentModeRequestIdRef.current += 1
       silentModeRef.current = payload.enabled
       setIsSilentModeState(payload.enabled)
       if (payload.enabled) {
@@ -1844,6 +1865,8 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
     // follows corrects this immediately.
     silentModeRef.current = false
     setIsSilentModeState(false)
+    silentModeConfirmedRef.current = false
+    silentModeRequestIdRef.current += 1
 
     ws.onmessage = (event) => {
       try {
@@ -2338,24 +2361,96 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
 
   /**
    * Flip silent mode from the UI toggle. Applied locally right away (so the
-   * button reflects the tap instantly) and sent to the backend over the same
-   * socket as every other session command; if the backend disagrees -- or
-   * the `set_silent_mode` tool changes it again -- the `silent_mode_state`
-   * push handled above is what actually sticks.
+   * button reflects the tap instantly) and persisted with a REST POST to
+   * `/conversations/{id}/silent-mode` -- silent mode is per-conversation
+   * server state, not a socket command. The POST's own response reconciles
+   * the optimistic flip; a failure reverts it and surfaces a status message.
+   * Either way, the authoritative `silent_mode_state` push (handled above) is
+   * what actually sticks if it disagrees -- this client's own toggle lands
+   * back through that same push, same as the `set_silent_mode` tool's does.
    */
   const setSilentMode = (enabled: boolean) => {
     if (enabled === silentModeRef.current) {
       return
     }
+    const previous = silentModeRef.current
     silentModeRef.current = enabled
     setIsSilentModeState(enabled)
     if (enabled) {
       stopAudioForSilentMode()
     }
-    sendSocketEvent({
-      event: SILENT_MODE_COMMAND_EVENT,
-      [SILENT_MODE_STATE_FIELD]: enabled,
-    })
+
+    const conversationId = conversationIdRef.current
+    if (!conversationId) {
+      // No conversation yet to persist against -- local state is all there
+      // is until one starts; the next connect/first turn will sync it.
+      return
+    }
+
+    const requestId = (silentModeRequestIdRef.current += 1)
+
+    void (async () => {
+      try {
+        const response = await authFetch(silentModeEndpoint(conversationId), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ [SILENT_MODE_STATE_FIELD]: enabled }),
+        })
+        if (!response.ok) {
+          throw new Error(`Silent mode request failed (${response.status})`)
+        }
+        const data = (await response.json()) as Record<string, unknown>
+        const confirmed = data[SILENT_MODE_RESPONSE_FIELD]
+        // Superseded by a newer toggle or a push that arrived while this
+        // request was in flight -- that one is authoritative now, not this.
+        if (requestId !== silentModeRequestIdRef.current) {
+          return
+        }
+        silentModeConfirmedRef.current = true
+        if (typeof confirmed === 'boolean' && confirmed !== silentModeRef.current) {
+          silentModeRef.current = confirmed
+          setIsSilentModeState(confirmed)
+          if (confirmed) {
+            stopAudioForSilentMode()
+          }
+        }
+      } catch {
+        if (requestId !== silentModeRequestIdRef.current) {
+          return
+        }
+        silentModeRef.current = previous
+        setIsSilentModeState(previous)
+        if (previous) {
+          stopAudioForSilentMode()
+        }
+        setStatusMessage(
+          enabled
+            ? "Couldn't turn silent mode on. Still speaking replies aloud."
+            : "Couldn't turn silent mode off. Still muted.",
+        )
+      }
+    })()
+  }
+
+  /**
+   * Fallback sync for silent mode: applied only before this connection has
+   * heard its own authoritative `silent_mode_state` push (see
+   * `silentModeConfirmedRef`), from a GET /conversations/{id} response the
+   * chat hook already fetches for other reasons (see useNovaChat's
+   * `refreshConversation`). The push is still the primary source of truth;
+   * this just avoids a stale "off" lingering in the UI until the next push
+   * if the GET resolves first.
+   */
+  const syncSilentModeFromServer = (enabled: boolean) => {
+    if (silentModeConfirmedRef.current || enabled === silentModeRef.current) {
+      return
+    }
+    silentModeConfirmedRef.current = true
+    silentModeRef.current = enabled
+    setIsSilentModeState(enabled)
+    if (enabled) {
+      stopAudioForSilentMode()
+    }
   }
 
   useEffect(() => {
@@ -2465,5 +2560,6 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
     isConnected,
     isSilentMode,
     setSilentMode,
+    syncSilentModeFromServer,
   }
 }

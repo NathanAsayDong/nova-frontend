@@ -95,6 +95,12 @@ export function useNovaChat() {
   const [isLoadingHistory, setIsLoadingHistory] = useState(false)
   const [error, setError] = useState('')
   const [project, setProject] = useState<ProjectSummary | null>(null)
+  // Fallback source for silent mode, read off GET /conversations/{id} (see
+  // `refreshConversation` below). `useNovaRuntime.syncSilentModeFromServer`
+  // is the consumer -- it only applies this before its own authoritative
+  // `silent_mode_state` push has landed. null means "not fetched yet /
+  // conversation doesn't report it", not "off".
+  const [conversationSilentMode, setConversationSilentMode] = useState<boolean | null>(null)
 
   const conversationIdRef = useRef<string | null>(loadConversationId())
   const abortRef = useRef<AbortController | null>(null)
@@ -178,8 +184,12 @@ export function useNovaChat() {
       if (!response.ok) {
         return
       }
-      const data = (await response.json()) as { project?: ProjectSummary | null }
+      const data = (await response.json()) as {
+        project?: ProjectSummary | null
+        silentMode?: boolean
+      }
       setProject(data.project ?? null)
+      setConversationSilentMode(typeof data.silentMode === 'boolean' ? data.silentMode : null)
     } catch {
       // Header metadata is informational; failures shouldn't surface as errors.
     }
@@ -550,6 +560,7 @@ export function useNovaChat() {
     error,
     conversationId: conversationIdRef.current,
     project,
+    conversationSilentMode,
     sendMessage,
     stopStreaming,
     startNewConversation,
