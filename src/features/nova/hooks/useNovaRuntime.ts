@@ -1022,7 +1022,17 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
 
     if (!supportsMse) {
       while (!streamBuffer.ended) {
+        // Safety net: even if the backend sent audio while silent mode is
+        // on (it is expected not to -- see silentMode.ts), never actually
+        // play it. Nothing has started yet on this path, so there is
+        // nothing to tear down, just stop waiting on more of this clip.
+        if (silentModeRef.current) {
+          return
+        }
         await waitForNextStreamSignal(streamBuffer)
+      }
+      if (silentModeRef.current) {
+        return
       }
       cleanupAudioUrl()
       const streamBlob = new Blob(streamBuffer.chunks, { type: streamBuffer.mimeType })
@@ -1123,7 +1133,7 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
     })
 
     while (true) {
-      if (suppressAssistantAudioUntilNextTurnRef.current) {
+      if (suppressAssistantAudioUntilNextTurnRef.current || silentModeRef.current) {
         break
       }
       const nextChunk = streamBuffer.chunks.shift()
@@ -1195,7 +1205,7 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
     isAudioQueueRunningRef.current = true
     try {
       while (audioQueueRef.current.length > 0) {
-        if (suppressAssistantAudioUntilNextTurnRef.current) {
+        if (suppressAssistantAudioUntilNextTurnRef.current || silentModeRef.current) {
           audioQueueRef.current = []
           break
         }
@@ -1568,6 +1578,12 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
       // the backend's actual state rather than just the local click.
       silentModeRef.current = payload.enabled
       setIsSilentModeState(payload.enabled)
+      if (payload.enabled) {
+        // Same safety net as the local toggle: stop anything already
+        // playing or queued the instant silent mode turns on, including
+        // when the `set_silent_mode` tool is what turned it on.
+        stopAudioForSilentMode()
+      }
       return
     }
 
@@ -2300,6 +2316,27 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
   }
 
   /**
+   * Safety net for turning silent mode on: the backend is expected to skip
+   * TTS synthesis entirely while it's on (no provider call at all), so in
+   * the normal case there is nothing here to stop. But the audio-stream
+   * handlers already refuse to buffer or play anything that arrives while
+   * `silentModeRef.current` is true, and this is the same refusal applied
+   * to whatever was already in flight the instant the flag flips -- same
+   * teardown `triggerWakeBargeIn` uses to cut off a reply for a wake
+   * barge-in, minus the "go back to listening" side effects, since turning
+   * silent mode on shouldn't otherwise disturb the conversation.
+   */
+  const stopAudioForSilentMode = () => {
+    audioQueueRef.current = []
+    streamBuffersRef.current.forEach((streamBuffer) => {
+      streamBuffer.ended = true
+      notifyStreamWaiters(streamBuffer)
+    })
+    streamBuffersRef.current.clear()
+    stopActiveAgentAudioPlayback()
+  }
+
+  /**
    * Flip silent mode from the UI toggle. Applied locally right away (so the
    * button reflects the tap instantly) and sent to the backend over the same
    * socket as every other session command; if the backend disagrees -- or
@@ -2312,6 +2349,9 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
     }
     silentModeRef.current = enabled
     setIsSilentModeState(enabled)
+    if (enabled) {
+      stopAudioForSilentMode()
+    }
     sendSocketEvent({
       event: SILENT_MODE_COMMAND_EVENT,
       [SILENT_MODE_STATE_FIELD]: enabled,

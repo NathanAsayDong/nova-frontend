@@ -25,6 +25,15 @@
  * events -- nothing special on the client is needed for that to play, only
  * that silent mode's own `enabled: false` push is applied (synchronously, in
  * socket-message order) before that audio arrives.
+ *
+ * While silent mode is on, the backend agent is expected to skip TTS
+ * synthesis entirely (no provider call), so `assistant_audio_stream_*`
+ * should simply never arrive. The client does not rely on that, though:
+ * `useNovaRuntime` refuses to buffer or play any `assistant_audio_stream_*`
+ * data while `silentModeRef.current` is true, and proactively tears down
+ * anything already playing or queued the instant the flag flips on (see
+ * `stopAudioForSilentMode`) -- a safety net against audio arriving anyway,
+ * not the primary mechanism.
  */
 
 /** `event` value for the client's outgoing toggle command. */
