@@ -24,6 +24,11 @@ import { containsWakePhrase, startsWithWakePhrase } from '../wakePhrase'
 import { playEarcon, primeEarcons } from '../earcons'
 import { createTurnDetector, type TurnDetector } from '../turnDetector'
 import { SILENT_CLIP_DATA_URI } from '../silentClip'
+import {
+  SILENT_MODE_RESPONSE_FIELD,
+  SILENT_MODE_STATE_FIELD,
+  silentModeEndpoint,
+} from '../silentMode'
 import { publishFaceLevel } from '../../face/publisher'
 import { authFetch } from '../../../lib/api'
 
@@ -114,6 +119,22 @@ type UseNovaRuntimeResult = {
   setVoiceMode: (mode: VoiceMode) => void
   /** The socket to the tower is open. False while (re)connecting. */
   isConnected: boolean
+  /**
+   * Nova keeps listening and replying as usual, but replies are not spoken
+   * aloud -- the text still shows up in the transcript normally. Per
+   * session: resets to false on every new connection (see `attachSocket`).
+   * Can also be flipped by the backend itself (the `set_silent_mode` tool),
+   * in which case this reflects that push, not just local clicks.
+   */
+  isSilentMode: boolean
+  setSilentMode: (enabled: boolean) => void
+  /**
+   * Fallback sync point for callers that already fetch conversation state
+   * over REST (e.g. useNovaChat's `refreshConversation`, which reads
+   * GET /conversations/{id}). Only applies before this connection's own
+   * authoritative push has landed; see `silentModeConfirmedRef`.
+   */
+  syncSilentModeFromServer: (enabled: boolean) => void
 }
 
 type NovaRuntimeOptions = {
@@ -158,6 +179,21 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
   const [needsSoundUnlock, setNeedsSoundUnlock] = useState(false)
   const [voiceMode, setVoiceModeState] = useState<VoiceMode>(loadVoiceMode)
   const voiceModeRef = useRef<VoiceMode>(voiceMode)
+  // Per session, not persisted: defaults off on mount and is reset to off on
+  // every new socket connection (see `attachSocket`), same place "new
+  // session" and "reconnect" both already funnel through.
+  const [isSilentMode, setIsSilentModeState] = useState(false)
+  const silentModeRef = useRef(false)
+  // True once this connection has heard an authoritative `silent_mode_state`
+  // push, or a REST toggle round-tripped. `syncSilentModeFromServer` (the
+  // GET /conversations/{id} fallback) only applies before that happens, so it
+  // can never stomp a push or a user's own in-flight toggle that landed
+  // after the GET request went out.
+  const silentModeConfirmedRef = useRef(false)
+  // Bumped on every local toggle and every incoming push, so a REST
+  // response that resolves after something newer has already superseded it
+  // (another toggle, or a push) is ignored instead of clobbering state.
+  const silentModeRequestIdRef = useRef(0)
   const activeCaptureRef = useRef<ActiveCapture | null>(null)
   const sentryGraceTimerRef = useRef<number | null>(null)
   const sentryListenTimerRef = useRef<number | null>(null)
@@ -1004,7 +1040,17 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
 
     if (!supportsMse) {
       while (!streamBuffer.ended) {
+        // Safety net: even if the backend sent audio while silent mode is
+        // on (it is expected not to -- see silentMode.ts), never actually
+        // play it. Nothing has started yet on this path, so there is
+        // nothing to tear down, just stop waiting on more of this clip.
+        if (silentModeRef.current) {
+          return
+        }
         await waitForNextStreamSignal(streamBuffer)
+      }
+      if (silentModeRef.current) {
+        return
       }
       cleanupAudioUrl()
       const streamBlob = new Blob(streamBuffer.chunks, { type: streamBuffer.mimeType })
@@ -1105,7 +1151,7 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
     })
 
     while (true) {
-      if (suppressAssistantAudioUntilNextTurnRef.current) {
+      if (suppressAssistantAudioUntilNextTurnRef.current || silentModeRef.current) {
         break
       }
       const nextChunk = streamBuffer.chunks.shift()
@@ -1177,7 +1223,7 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
     isAudioQueueRunningRef.current = true
     try {
       while (audioQueueRef.current.length > 0) {
-        if (suppressAssistantAudioUntilNextTurnRef.current) {
+        if (suppressAssistantAudioUntilNextTurnRef.current || silentModeRef.current) {
           audioQueueRef.current = []
           break
         }
@@ -1431,7 +1477,11 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
     }
 
     if (payload.type === 'assistant_audio_stream_start') {
-      if (suppressAssistantAudioUntilNextTurnRef.current) {
+      // Silent mode drops the TTS audio entirely, before it is ever
+      // buffered or queued -- the text/turn-flow events (assistant_text,
+      // speech_text, status_text, done) are deliberately NOT gated here, so
+      // the chat transcript and conversation flow keep working as usual.
+      if (suppressAssistantAudioUntilNextTurnRef.current || silentModeRef.current) {
         return
       }
       const streamBuffer: StreamAudioBuffer = {
@@ -1449,7 +1499,7 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
     }
 
     if (payload.type === 'assistant_audio_stream_chunk') {
-      if (suppressAssistantAudioUntilNextTurnRef.current) {
+      if (suppressAssistantAudioUntilNextTurnRef.current || silentModeRef.current) {
         return
       }
       const streamBuffer = streamBuffersRef.current.get(payload.streamId)
@@ -1462,7 +1512,7 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
     }
 
     if (payload.type === 'assistant_audio_stream_end') {
-      if (suppressAssistantAudioUntilNextTurnRef.current) {
+      if (suppressAssistantAudioUntilNextTurnRef.current || silentModeRef.current) {
         return
       }
       const streamBuffer = streamBuffersRef.current.get(payload.streamId)
@@ -1537,6 +1587,24 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
 
     if (payload.type === 'tool_call' || payload.type === 'artifact') {
       optionsRef.current.onAgentEvent?.(payload as unknown as ChatStreamEvent)
+      return
+    }
+
+    if (payload.type === 'silent_mode_state') {
+      // Authoritative: pushed once on connect and whenever silent mode
+      // changes -- this client's own REST toggle, another client's, or the
+      // `set_silent_mode` tool -- so the UI always reflects the backend's
+      // actual state rather than just the local click.
+      silentModeConfirmedRef.current = true
+      silentModeRequestIdRef.current += 1
+      silentModeRef.current = payload.enabled
+      setIsSilentModeState(payload.enabled)
+      if (payload.enabled) {
+        // Same safety net as the local toggle: stop anything already
+        // playing or queued the instant silent mode turns on, including
+        // when the `set_silent_mode` tool is what turned it on.
+        stopAudioForSilentMode()
+      }
       return
     }
 
@@ -1789,6 +1857,16 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
     wsRef.current = ws
     reconnectAttemptRef.current = 0
     setIsConnected(true)
+    // Silent mode is per session: a brand-new connection (first connect or a
+    // reconnect after a drop) starts a fresh session as far as the backend's
+    // socket state goes, so reset to the documented default here rather than
+    // carrying a stale "on" across a reconnect. If the backend's own `ready`
+    // handshake disagrees, the authoritative `silent_mode_state` push that
+    // follows corrects this immediately.
+    silentModeRef.current = false
+    setIsSilentModeState(false)
+    silentModeConfirmedRef.current = false
+    silentModeRequestIdRef.current += 1
 
     ws.onmessage = (event) => {
       try {
@@ -2260,6 +2338,121 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
     }
   }
 
+  /**
+   * Safety net for turning silent mode on: the backend is expected to skip
+   * TTS synthesis entirely while it's on (no provider call at all), so in
+   * the normal case there is nothing here to stop. But the audio-stream
+   * handlers already refuse to buffer or play anything that arrives while
+   * `silentModeRef.current` is true, and this is the same refusal applied
+   * to whatever was already in flight the instant the flag flips -- same
+   * teardown `triggerWakeBargeIn` uses to cut off a reply for a wake
+   * barge-in, minus the "go back to listening" side effects, since turning
+   * silent mode on shouldn't otherwise disturb the conversation.
+   */
+  const stopAudioForSilentMode = () => {
+    audioQueueRef.current = []
+    streamBuffersRef.current.forEach((streamBuffer) => {
+      streamBuffer.ended = true
+      notifyStreamWaiters(streamBuffer)
+    })
+    streamBuffersRef.current.clear()
+    stopActiveAgentAudioPlayback()
+  }
+
+  /**
+   * Flip silent mode from the UI toggle. Applied locally right away (so the
+   * button reflects the tap instantly) and persisted with a REST POST to
+   * `/conversations/{id}/silent-mode` -- silent mode is per-conversation
+   * server state, not a socket command. The POST's own response reconciles
+   * the optimistic flip; a failure reverts it and surfaces a status message.
+   * Either way, the authoritative `silent_mode_state` push (handled above) is
+   * what actually sticks if it disagrees -- this client's own toggle lands
+   * back through that same push, same as the `set_silent_mode` tool's does.
+   */
+  const setSilentMode = (enabled: boolean) => {
+    if (enabled === silentModeRef.current) {
+      return
+    }
+    const previous = silentModeRef.current
+    silentModeRef.current = enabled
+    setIsSilentModeState(enabled)
+    if (enabled) {
+      stopAudioForSilentMode()
+    }
+
+    const conversationId = conversationIdRef.current
+    if (!conversationId) {
+      // No conversation yet to persist against -- local state is all there
+      // is until one starts; the next connect/first turn will sync it.
+      return
+    }
+
+    const requestId = (silentModeRequestIdRef.current += 1)
+
+    void (async () => {
+      try {
+        const response = await authFetch(silentModeEndpoint(conversationId), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ [SILENT_MODE_STATE_FIELD]: enabled }),
+        })
+        if (!response.ok) {
+          throw new Error(`Silent mode request failed (${response.status})`)
+        }
+        const data = (await response.json()) as Record<string, unknown>
+        const confirmed = data[SILENT_MODE_RESPONSE_FIELD]
+        // Superseded by a newer toggle or a push that arrived while this
+        // request was in flight -- that one is authoritative now, not this.
+        if (requestId !== silentModeRequestIdRef.current) {
+          return
+        }
+        silentModeConfirmedRef.current = true
+        if (typeof confirmed === 'boolean' && confirmed !== silentModeRef.current) {
+          silentModeRef.current = confirmed
+          setIsSilentModeState(confirmed)
+          if (confirmed) {
+            stopAudioForSilentMode()
+          }
+        }
+      } catch {
+        if (requestId !== silentModeRequestIdRef.current) {
+          return
+        }
+        silentModeRef.current = previous
+        setIsSilentModeState(previous)
+        if (previous) {
+          stopAudioForSilentMode()
+        }
+        setStatusMessage(
+          enabled
+            ? "Couldn't turn silent mode on. Still speaking replies aloud."
+            : "Couldn't turn silent mode off. Still muted.",
+        )
+      }
+    })()
+  }
+
+  /**
+   * Fallback sync for silent mode: applied only before this connection has
+   * heard its own authoritative `silent_mode_state` push (see
+   * `silentModeConfirmedRef`), from a GET /conversations/{id} response the
+   * chat hook already fetches for other reasons (see useNovaChat's
+   * `refreshConversation`). The push is still the primary source of truth;
+   * this just avoids a stale "off" lingering in the UI until the next push
+   * if the GET resolves first.
+   */
+  const syncSilentModeFromServer = (enabled: boolean) => {
+    if (silentModeConfirmedRef.current || enabled === silentModeRef.current) {
+      return
+    }
+    silentModeConfirmedRef.current = true
+    silentModeRef.current = enabled
+    setIsSilentModeState(enabled)
+    if (enabled) {
+      stopAudioForSilentMode()
+    }
+  }
+
   useEffect(() => {
     let cancelled = false
 
@@ -2365,5 +2558,8 @@ export function useNovaRuntime(options: NovaRuntimeOptions = {}): UseNovaRuntime
     voiceMode,
     setVoiceMode,
     isConnected,
+    isSilentMode,
+    setSilentMode,
+    syncSilentModeFromServer,
   }
 }

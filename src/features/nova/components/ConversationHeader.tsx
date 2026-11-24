@@ -21,6 +21,8 @@ type ConversationHeaderProps = {
   voiceMode: VoiceMode
   /** The voice socket to the tower is open. */
   isConnected: boolean
+  /** Nova keeps replying as usual, but replies are not spoken aloud. */
+  isSilentMode: boolean
   /** A meeting is recording, so Nova is transcribing rather than listening. */
   isMeetingMode: boolean
   /** Blocks the toggle while a meeting is starting or being written up. */
@@ -30,6 +32,7 @@ type ConversationHeaderProps = {
   onNewConversation: () => void
   onTogglePower: () => void
   onToggleSentry: () => void
+  onToggleSilentMode: () => void
   onToggleMeeting: () => void
   onToggleMeetingsPanel: () => void
   onToggleCodingPanel: () => void
@@ -51,6 +54,7 @@ export function ConversationHeader({
   isNovaEnabled,
   voiceMode,
   isConnected,
+  isSilentMode,
   isMeetingMode,
   isMeetingBusy,
   isMeetingsPanelOpen,
@@ -58,6 +62,7 @@ export function ConversationHeader({
   onNewConversation,
   onTogglePower,
   onToggleSentry,
+  onToggleSilentMode,
   onToggleMeeting,
   onToggleMeetingsPanel,
   onToggleCodingPanel,
@@ -132,6 +137,21 @@ export function ConversationHeader({
           >
             {isSentry ? <span className="sentryDot" aria-hidden="true" /> : null}
             Sentry
+          </button>
+          <button
+            type="button"
+            className={`meetingToggle silentToggle ${isSilentMode ? 'active' : ''}`}
+            onClick={onToggleSilentMode}
+            role="switch"
+            aria-checked={isSilentMode}
+            title={
+              isSilentMode
+                ? 'Silent mode is on: Nova replies in text only. Click to let Nova speak again.'
+                : 'Silent mode: Nova keeps listening and replying, but does not speak replies out loud.'
+            }
+          >
+            {isSilentMode ? <span className="silentDot" aria-hidden="true" /> : null}
+            Silent
           </button>
         </div>
 
