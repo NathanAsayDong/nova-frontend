@@ -69,6 +69,8 @@ function App() {
     voiceMode,
     setVoiceMode,
     isConnected,
+    isSilentMode,
+    setSilentMode,
   } = useNovaRuntime({
     onUserTranscript: addVoiceUserMessage,
     onPartialUserTranscript: updateVoiceDraft,
@@ -165,12 +167,14 @@ function App() {
           isNovaEnabled={isNovaEnabled}
           voiceMode={voiceMode}
           isConnected={isConnected}
+          isSilentMode={isSilentMode}
           isMeetingMode={isMeetingRecording}
           isMeetingBusy={isMeetingBusy}
           isMeetingsPanelOpen={isMeetingsPanelOpen}
           onNewConversation={handleNewConversation}
           onTogglePower={() => setNovaPower(!isNovaEnabled)}
           onToggleSentry={() => setVoiceMode(voiceMode === 'sentry' ? 'conversation' : 'sentry')}
+          onToggleSilentMode={() => setSilentMode(!isSilentMode)}
           onToggleMeeting={handleToggleMeeting}
           onToggleMeetingsPanel={() => {
             setIsStartFormOpen(false)
